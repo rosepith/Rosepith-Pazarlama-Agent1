@@ -20,3 +20,8 @@ AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini")
 
 # Çalışma modu: "full", "backup", "assistant"
 SYSTEM_MODE = os.getenv("SYSTEM_MODE", "full")
+
+# Rol tanımları
+ROLE_YASIN_ID = os.getenv("ROLE_YASIN_ID", "")
+ROLE_PERSONNEL_IDS = [x.strip() for x in os.getenv("ROLE_PERSONNEL_IDS", "").split(",") if x.strip()]
+ROLE_CUSTOMER_IDS = [x.strip() for x in os.getenv("ROLE_CUSTOMER_IDS", "").split(",") if x.strip()]
