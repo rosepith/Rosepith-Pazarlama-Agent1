@@ -2,7 +2,7 @@
 # Bot üzerinden mesaj gönderme, komut alma ve bildirim yönetimi
 
 import requests
-from core.config import TELEGRAM_BOT_TOKEN
+from core.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from core.database import log_event
 
 BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
