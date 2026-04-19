@@ -1,0 +1,40 @@
+# API anahtarları ve gizli bilgiler - KESİNLİKLE commit edilmez
+.env
+*.env
+.env.*
+
+# Veritabanı
+*.db
+*.sqlite3
+
+# Python önbellek
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+
+# Sanal ortam
+venv/
+.venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Loglar
+*.log
+logs/
+
+# Build
+dist/
+build/
+*.egg-info/

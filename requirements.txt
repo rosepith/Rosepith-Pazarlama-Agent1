@@ -1,0 +1,29 @@
+# Rosepith Pazarlama Agent - Bağımlılıklar
+
+# Ortam değişkenleri
+python-dotenv==1.0.1
+
+# AI Sağlayıcıları
+google-generativeai==0.7.2
+openai==1.35.0
+
+# HTTP İstekleri
+requests==2.32.3
+
+# Terminal UI
+rich==13.7.1
+
+# Telegram Bot
+python-telegram-bot==21.3
+
+# E-posta (standart kütüphane destekli, ek paket gerekmeyebilir)
+# smtplib ve imaplib Python ile birlikte gelir
+
+# Veri işleme
+pandas==2.2.2
+
+# Zamanlama
+schedule==1.2.2
+
+# Güvenlik / Hash
+cryptography==42.0.8
