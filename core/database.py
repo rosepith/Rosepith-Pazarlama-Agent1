@@ -49,6 +49,28 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS task_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            message TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -58,6 +80,46 @@ def log_event(agent: str, message: str, level: str = "INFO"):
     conn.execute(
         "INSERT INTO logs (level, agent, message) VALUES (?, ?, ?)",
         (level, agent, message)
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_message(user_id: str, role: str, direction: str, message: str):
+    """Konuşmayı kaydet. direction: 'in' (kullanıcıdan) veya 'out' (bottan)."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO conversations (user_id, role, direction, message) VALUES (?, ?, ?, ?)",
+        (user_id, role, direction, message)
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_history(user_id: str, limit: int = 10) -> list[dict]:
+    """Kullanıcının son N mesajını yükle, AI formatında döndür."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT direction, message FROM conversations
+           WHERE user_id = ?
+           ORDER BY id DESC LIMIT ?""",
+        (user_id, limit)
+    ).fetchall()
+    conn.close()
+    # Ters çevir (en eskiden en yeniye)
+    history = []
+    for row in reversed(rows):
+        ai_role = "user" if row["direction"] == "in" else "model"
+        history.append({"role": ai_role, "parts": [row["message"]]})
+    return history
+
+
+def add_to_queue(user_id: str, role: str, message: str):
+    """Personel görevini kuyruğa ekle."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO task_queue (user_id, role, message) VALUES (?, ?, ?)",
+        (user_id, role, message)
     )
     conn.commit()
     conn.close()

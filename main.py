@@ -8,7 +8,7 @@ from core.config import SYSTEM_MODE
 
 
 def main():
-    print("🌹 Rosepith Pazarlama Agent başlatılıyor...")
+    print("Rosepith Pazarlama Agent baslatiliyor...")
 
     init_db()
     log_event("system", f"Sistem başlatıldı (mod: {SYSTEM_MODE})")
@@ -32,9 +32,9 @@ def main():
         print(f"[Hata] Bilinmeyen mod: {SYSTEM_MODE}")
         sys.exit(1)
 
-    print(f"\n✅ Sistem hazır (mod: {SYSTEM_MODE})")
-    print("Dashboard için: python -m terminal.dashboard")
-    print("Çıkmak için Ctrl+C\n")
+    print(f"\n[OK] Sistem hazir (mod: {SYSTEM_MODE})")
+    print("Dashboard icin: python -m terminal.dashboard")
+    print("Cikis icin Ctrl+C\n")
 
     try:
         while True:

@@ -2,9 +2,14 @@
 # Ortam değişkenlerini yükler ve sistem genelinde erişim sağlar
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Proje kök dizini — config.py her zaman core/ altında
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# .env'i proje kökünden yükle
+load_dotenv(PROJECT_ROOT / ".env")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -13,7 +18,10 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 WHATSAPP_NUMBER = os.getenv("WHATSAPP_NUMBER")
 MAIL_USER = os.getenv("MAIL_USER")
 MAIL_PASS = os.getenv("MAIL_PASS")
-DB_PATH = os.getenv("DB_PATH", "rosepith.db")
+
+# DB her zaman proje kökünde oluşsun, çalışma dizininden bağımsız
+_db_name = os.getenv("DB_PATH", "rosepith.db")
+DB_PATH = str(PROJECT_ROOT / _db_name)
 
 # Aktif AI sağlayıcısı: "gemini" veya "openai"
 AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini")

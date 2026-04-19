@@ -1,5 +1,5 @@
 # Rosepith Pazarlama Agent - Art Direktör Ajanı
-# Telegram üzerinden gelen mesajları analiz eder, role göre yanıtlar ve departmanlara yönlendirir.
+# Telegram kapısı: rol tanıma, mesai kontrolü, AI yanıt üretimi, hafıza yönetimi
 
 import time
 import random
@@ -14,104 +14,40 @@ from core.config import (
     ROLE_PERSONNEL_IDS,
     ROLE_CUSTOMER_IDS,
 )
-from core.database import log_event
-from core.memory import remember, recall
-
-# ─── Sabitler ────────────────────────────────────────────────────────────────
+from core.database import log_event, save_message, load_history, add_to_queue
+from core.ai import get_response
 
 AGENT_NAME = "art_director"
 BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
+# ─── Mesai & Tatil ────────────────────────────────────────────────────────────
+
 WORK_START = datetime.time(9, 30)
 WORK_END   = datetime.time(18, 0)
 
-# Sabit Türkiye resmi tatilleri (GG-AA)
 FIXED_HOLIDAYS = {
-    "01-01",  # Yılbaşı
-    "23-04",  # Ulusal Egemenlik ve Çocuk Bayramı
-    "01-05",  # Emek ve Dayanışma Günü
-    "19-05",  # Atatürk'ü Anma, Gençlik ve Spor Bayramı
-    "15-07",  # Demokrasi ve Millî Birlik Günü
-    "30-08",  # Zafer Bayramı
-    "29-10",  # Cumhuriyet Bayramı
+    "01-01", "23-04", "01-05", "19-05",
+    "15-07", "30-08", "29-10",
 }
 
-# Değişken dini tatiller (manuel güncellenir, YYYY-MM-DD)
 VARIABLE_HOLIDAYS = {
-    "2025-03-30", "2025-03-31",  # Ramazan Bayramı 2025
-    "2025-04-01",
-    "2025-06-06", "2025-06-07",  # Kurban Bayramı 2025
-    "2025-06-08", "2025-06-09",
-    "2026-03-19", "2026-03-20",  # Ramazan Bayramı 2026
-    "2026-03-21",
-    "2026-05-26", "2026-05-27",  # Kurban Bayramı 2026
-    "2026-05-28", "2026-05-29",
+    "2025-03-30", "2025-03-31", "2025-04-01",
+    "2025-06-06", "2025-06-07", "2025-06-08", "2025-06-09",
+    "2026-03-19", "2026-03-20", "2026-03-21",
+    "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29",
 }
 
-# ─── Anahtar kelime → departman eşleştirmesi ─────────────────────────────────
-
-ROUTING_RULES = {
-    "marketing": [
-        "kampanya", "instagram", "reklam", "içerik", "post", "paylaşım",
-        "sosyal medya", "facebook", "tiktok", "linkedin", "strateji",
-        "hedef kitle", "analiz", "metrik", "insight", "bütçe",
-    ],
-    "technical": [
-        "site", "web", "hata", "bug", "kod", "domain", "hosting",
-        "deploy", "sunucu", "ssl", "yavaş", "çöktü", "bağlantı",
-        "güncelleme", "teknik", "api", "entegrasyon",
-    ],
-    "arge": [
-        "araştır", "rakip", "trend", "pazar", "analiz et", "rapor",
-        "veri", "istatistik", "sektör", "benchmark", "fırsat",
-    ],
-}
-
-# ─── Ton kütüphanesi ──────────────────────────────────────────────────────────
-
-TONE = {
-    "greeting_yasin":     "Yasin bey, buyurun.",
-    "greeting_personnel": "Merhaba. Ne var?",
-    "greeting_customer":  "Merhaba, Rosepith'e hoş geldiniz.",
-    "greeting_unknown":   "Merhaba. Sizi tanıyamadım, kimsiniz?",
-
-    "off_hours_yasin":    "Mesai dışı. Acil mi?",
-    "off_hours_personnel":"Mesai bitti. Yarın 09:30'da görüşelim.",
-    "off_hours_customer": "Şu an çalışma saatlerimiz dışındayız (09:30–18:00). Yarın dönüyoruz.",
-
-    "weekend_yasin":      "Hafta sonu. Yine de dinliyorum.",
-    "weekend_personnel":  "Hafta sonu. Acil değilse Pazartesi.",
-    "weekend_customer":   "Hafta sonu kapalıyız. Pazartesi 09:30'da hizmetinizdeyiz.",
-
-    "holiday":            "Bugün resmi tatil. Yarın döneceğim.",
-
-    "route_marketing":    "Pazarlama departmanına iletiyorum.",
-    "route_technical":    "Teknik ekibe yönlendiriyorum.",
-    "route_arge":         "AR-GE birimine aktarıyorum.",
-    "route_unknown":      "Tam anlayamadım. Biraz daha açar mısınız?",
-
-    "understood":         "Anladım.",
-    "noted":              "Not aldım.",
-    "wait":               "Bir saniye.",
-}
-
-# ─── Yardımcı fonksiyonlar ────────────────────────────────────────────────────
+# ─── Yardımcılar ──────────────────────────────────────────────────────────────
 
 def _is_holiday(now: datetime.datetime) -> bool:
-    if now.strftime("%d-%m") in FIXED_HOLIDAYS:
-        return True
-    if now.strftime("%Y-%m-%d") in VARIABLE_HOLIDAYS:
-        return True
-    return False
-
+    return (now.strftime("%d-%m") in FIXED_HOLIDAYS or
+            now.strftime("%Y-%m-%d") in VARIABLE_HOLIDAYS)
 
 def _is_weekend(now: datetime.datetime) -> bool:
-    return now.weekday() >= 5  # 5=Cmt, 6=Paz
-
+    return now.weekday() >= 5
 
 def _is_work_hours(now: datetime.datetime) -> bool:
     return WORK_START <= now.time() <= WORK_END
-
 
 def _get_role(user_id: str) -> str:
     uid = str(user_id)
@@ -121,37 +57,27 @@ def _get_role(user_id: str) -> str:
         return "personnel"
     if uid in ROLE_CUSTOMER_IDS:
         return "customer"
-    return "unknown"
-
-
-def _detect_department(text: str) -> str | None:
-    text_lower = text.lower()
-    for dept, keywords in ROUTING_RULES.items():
-        for kw in keywords:
-            if kw in text_lower:
-                return dept
-    return None
-
+    return "customer"  # bilinmeyen = müşteri gibi davran
 
 def _human_delay():
-    """4–7 saniye arası rastgele gecikme: insan gibi görünsün."""
     time.sleep(random.uniform(4, 7))
 
-
-def _send(chat_id: str | int, text: str):
+def _send(chat_id, text: str):
     try:
-        requests.post(
+        resp = requests.post(
             f"{BASE_URL}/sendMessage",
             json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
-        log_event(AGENT_NAME, f"→ {chat_id}: {text[:60]}")
+        result = resp.json()
+        if result.get("ok"):
+            log_event(AGENT_NAME, f"→ {chat_id}: {text[:80]}")
+        else:
+            log_event(AGENT_NAME, f"Telegram hata: {result}", level="ERROR")
     except Exception as e:
         log_event(AGENT_NAME, f"Gönderim hatası: {e}", level="ERROR")
 
-
-def _send_typing(chat_id: str | int):
-    """Kullanıcıya 'yazıyor...' gösterir."""
+def _send_typing(chat_id):
     try:
         requests.post(
             f"{BASE_URL}/sendChatAction",
@@ -161,81 +87,66 @@ def _send_typing(chat_id: str | int):
     except Exception:
         pass
 
-# ─── Ana yanıt motoru ─────────────────────────────────────────────────────────
+# ─── Ana işlem ────────────────────────────────────────────────────────────────
 
-def build_response(user_id: str, text: str) -> str:
-    """Gelen mesajı değerlendirip uygun yanıtı döndürür."""
-    role = _get_role(user_id)
-    now  = datetime.datetime.now()
+def handle_message(user_id: str, chat_id, text: str):
+    """Gelen mesajı işle: hafızayı yükle, AI yanıtı üret, kaydet."""
+    role    = _get_role(user_id)
+    now     = datetime.datetime.now()
+    holiday = _is_holiday(now)
+    weekend = _is_weekend(now)
+    off     = not _is_work_hours(now)
 
-    # 1. Resmi tatil kontrolü
-    if _is_holiday(now):
-        return TONE["holiday"]
+    log_event(AGENT_NAME, f"Mesaj | user={user_id} role={role} | {text[:80]}")
 
-    # 2. Hafta sonu kontrolü
-    if _is_weekend(now):
-        return TONE[f"weekend_{role}"] if role != "unknown" else TONE["weekend_customer"]
+    # Gelen mesajı kaydet
+    save_message(user_id, role, "in", text)
 
-    # 3. Mesai saati kontrolü
-    if not _is_work_hours(now):
-        return TONE[f"off_hours_{role}"] if role != "unknown" else TONE["off_hours_customer"]
+    # Personel mesai dışı → kuyruğa al, kısa onay ver
+    if role == "personnel" and (weekend or off or holiday):
+        add_to_queue(user_id, role, text)
+        reply = "Mesai dışı. Görevin alındı, sabah işleniyor."
+        save_message(user_id, role, "out", reply)
+        _send(chat_id, reply)
+        return
 
-    # 4. Selamlama komutları
-    greet_triggers = ["/start", "/merhaba", "merhaba", "selam", "iyi günler", "günaydın"]
-    if any(text.lower().startswith(t) for t in greet_triggers):
-        return TONE[f"greeting_{role}"]
+    # Tüm durumlar için geçmiş konuşmayı yükle (son 10)
+    history = load_history(user_id, limit=10)
 
-    # 5. Durum/bilgi sorusu (Yasin'e özel)
-    if role == "yasin":
-        status_triggers = ["durum", "nasıl", "rapor", "özet", "ne var", "ne oldu"]
-        if any(t in text.lower() for t in status_triggers):
-            last = recall(AGENT_NAME, "last_summary") or "Henüz özetlenecek bir şey yok."
-            return f"Son durum: {last}"
+    # AI yanıtı üret
+    reply = get_response(
+        user_message=text,
+        role=role,
+        history=history,
+        is_off_hours=(off and not weekend and not holiday),
+        is_weekend=weekend,
+    )
 
-    # 6. Departman yönlendirmesi
-    dept = _detect_department(text)
-    if dept:
-        remember(AGENT_NAME, f"last_route_{user_id}", dept)
-        remember(AGENT_NAME, "last_summary", f"{role} → {dept} ({now.strftime('%H:%M')})")
-        log_event(AGENT_NAME, f"Yönlendirme: {role} → {dept}")
-        return TONE[f"route_{dept}"]
+    # Yanıtı kaydet ve gönder
+    save_message(user_id, role, "out", reply)
+    _send(chat_id, reply)
 
-    # 7. Kısa onay mesajları
-    ack_triggers = ["tamam", "ok", "peki", "anladım", "teşekkür", "tşk", "👍"]
-    if any(t in text.lower() for t in ack_triggers):
-        return TONE["noted"]
-
-    # 8. Anlaşılamadı
-    return TONE["route_unknown"]
-
-# ─── Telegram polling döngüsü ─────────────────────────────────────────────────
+# ─── Telegram Polling ─────────────────────────────────────────────────────────
 
 class ArtDirectorAgent:
     def __init__(self):
-        self.name = AGENT_NAME
-        self._offset = 0
+        self.name     = AGENT_NAME
+        self._offset  = 0
         self._running = False
 
     def _process_update(self, update: dict):
         message = update.get("message") or update.get("edited_message")
         if not message:
             return
-
         chat_id = message["chat"]["id"]
         user_id = str(message["from"]["id"])
-        text    = message.get("text", "")
-
+        text    = message.get("text", "").strip()
         if not text:
             return
 
-        log_event(self.name, f"Mesaj alındı | user={user_id} | text={text[:80]}")
-
-        # Yazıyor... göster, sonra bekle
         _send_typing(chat_id)
         _human_delay()
-
-        response = build_response(user_id, text)
-        _send(chat_id, response)
+        handle_message(user_id, chat_id, text)
 
     def _poll(self):
         log_event(self.name, "Polling başlatıldı")
@@ -249,34 +160,29 @@ class ArtDirectorAgent:
                 updates = resp.json().get("result", [])
                 for upd in updates:
                     self._offset = upd["update_id"] + 1
-                    t = threading.Thread(target=self._process_update, args=(upd,), daemon=True)
-                    t.start()
+                    threading.Thread(
+                        target=self._process_update,
+                        args=(upd,),
+                        daemon=True
+                    ).start()
             except Exception as e:
                 log_event(self.name, f"Polling hatası: {e}", level="ERROR")
                 time.sleep(5)
 
     def start(self):
-        """Art Direktör ajanını ayrı thread'de başlatır."""
         self._running = True
-        thread = threading.Thread(target=self._poll, daemon=True, name="art_director_poll")
-        thread.start()
+        t = threading.Thread(target=self._poll, daemon=True, name="art_director_poll")
+        t.start()
         log_event(self.name, "Art Direktör aktif")
         print("[Art Director] Telegram dinleniyor...")
-        return thread
+        return t
 
     def stop(self):
         self._running = False
         log_event(self.name, "Art Direktör durduruldu")
 
-    # Tek seferlik görev arayüzü (diğer ajanlarla uyum için)
     def run(self, task: dict) -> str:
-        task_type = task.get("type")
-        if task_type == "respond":
-            return build_response(
-                str(task.get("user_id", "")),
-                task.get("text", "")
-            )
-        if task_type == "send":
+        if task.get("type") == "send":
             _send(task.get("chat_id", TELEGRAM_CHAT_ID), task.get("text", ""))
             return "Gönderildi"
         return "[Art Director] Bilinmeyen görev tipi"

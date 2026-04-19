@@ -20,7 +20,7 @@ python-telegram-bot==21.3
 # smtplib ve imaplib Python ile birlikte gelir
 
 # Veri işleme
-pandas==2.2.2
+pandas>=2.2.2
 
 # Zamanlama
 schedule==1.2.2
