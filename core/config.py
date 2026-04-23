@@ -1,35 +1,44 @@
-# Rosepith Pazarlama Agent - Yapılandırma Modülü
-# Ortam değişkenlerini yükler ve sistem genelinde erişim sağlar
-
+# Rosepith — Yapılandırma (W10 Hibrit)
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Proje kök dizini — config.py her zaman core/ altında
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-# .env'i proje kökünden yükle
 load_dotenv(PROJECT_ROOT / ".env")
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-WHATSAPP_NUMBER = os.getenv("WHATSAPP_NUMBER")
-MAIL_USER = os.getenv("MAIL_USER")
-MAIL_PASS = os.getenv("MAIL_PASS")
+GEMINI_API_KEY           = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY           = os.getenv("OPENAI_API_KEY")
+TELEGRAM_BOT_TOKEN       = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID         = os.getenv("TELEGRAM_CHAT_ID")
+YASIN_TELEGRAM_ID        = os.getenv("YASIN_TELEGRAM_ID") or os.getenv("TELEGRAM_CHAT_ID","")
+ROLE_YASIN_ID            = YASIN_TELEGRAM_ID
 
-# DB her zaman proje kökünde oluşsun, çalışma dizininden bağımsız
-_db_name = os.getenv("DB_PATH", "rosepith.db")
-DB_PATH = str(PROJECT_ROOT / _db_name)
+WHATSAPP_PHONE_NUMBER_ID     = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+WHATSAPP_BUSINESS_ACCOUNT_ID = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID")
+WHATSAPP_ACCESS_TOKEN        = os.getenv("WHATSAPP_ACCESS_TOKEN")
+WHATSAPP_VERIFY_TOKEN        = os.getenv("WHATSAPP_VERIFY_TOKEN", "rosepith_webhook_2026")
+TEST_CUSTOMER_WHATSAPP       = os.getenv("TEST_CUSTOMER_WHATSAPP","")
 
-# Aktif AI sağlayıcısı: "gemini" veya "openai"
-AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini")
+# Hibrit relay
+RELAY_SECRET     = os.getenv("RELAY_SECRET", "rosepith_relay_2026")
+SERVER_RELAY_URL = os.getenv("SERVER_RELAY_URL", "https://rosekreatif.com.tr/agent-api/")
 
-# Çalışma modu: "full", "backup", "assistant"
 SYSTEM_MODE = os.getenv("SYSTEM_MODE", "full")
 
-# Rol tanımları
-ROLE_YASIN_ID = os.getenv("ROLE_YASIN_ID", "")
-ROLE_PERSONNEL_IDS = [x.strip() for x in os.getenv("ROLE_PERSONNEL_IDS", "").split(",") if x.strip()]
-ROLE_CUSTOMER_IDS = [x.strip() for x in os.getenv("ROLE_CUSTOMER_IDS", "").split(",") if x.strip()]
+_db = os.getenv("DB_PATH", "rosepith.db")
+DB_PATH = str(PROJECT_ROOT / _db)
+
+# Personel WhatsApp: {phone: isim}
+PERSONEL_WHATSAPP: dict[str, str] = {}
+_i = 1
+while True:
+    wa   = os.getenv(f"PERSONEL_{_i}_WHATSAPP","").strip()
+    isim = os.getenv(f"PERSONEL_{_i}_ISIM","").strip()
+    if not wa or not isim: break
+    PERSONEL_WHATSAPP[wa] = isim
+    _i += 1
+
+# Personel Telegram: {isim: telegram_id}
+PERSONEL: dict[str, str] = {}
+ROLE_PERSONNEL_IDS: list[str] = []
+ROLE_CUSTOMER_IDS:  list[str] = []

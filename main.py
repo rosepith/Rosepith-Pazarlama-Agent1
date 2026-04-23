@@ -1,47 +1,52 @@
-# Rosepith Pazarlama Agent - Ana Giriş Noktası
-# Sistemi başlatır, modu seçer ve ajan orkestrasyon döngüsünü çalıştırır
+# Rosepith Pazarlama Agent — Hibrit Ana Beyin (W10)
+# Sunucudan mesaj çeker, işler, yanıt yollar
 
 import sys
 import time
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
+
 from core.database import init_db, log_event
 from core.config import SYSTEM_MODE
 
 
 def main():
-    print("Rosepith Pazarlama Agent baslatiliyor...")
+    logger.info("=" * 50)
+    logger.info("Rosepith Hibrit Agent başlatılıyor...")
+    logger.info(f"Mod: {SYSTEM_MODE}")
+    logger.info("=" * 50)
 
     init_db()
     log_event("system", f"Sistem başlatıldı (mod: {SYSTEM_MODE})")
 
-    # Art Direktör her zaman aktif — Telegram kapısını o tutar
+    # Art Direktör — Telegram kapısı
     from agents.art_director import ArtDirectorAgent
-    art_director = ArtDirectorAgent()
-    art_director.start()
+    art = ArtDirectorAgent()
+    art.start()
+    log_event("system", "Art Direktör aktif (Telegram)")
 
-    # Moda göre diğer ajanları yükle
-    if SYSTEM_MODE == "full":
-        from modes.full_mode import run
-        run()
-    elif SYSTEM_MODE == "backup":
-        from modes.backup_mode import run
-        run()
-    elif SYSTEM_MODE == "assistant":
-        from modes.assistant_mode import run
-        run()
-    else:
-        print(f"[Hata] Bilinmeyen mod: {SYSTEM_MODE}")
-        sys.exit(1)
+    # Sunucu relay — heartbeat + mesaj kuyruk poller
+    from core.server_relay import start as start_relay
+    start_relay()
+    log_event("system", "Sunucu relay aktif (heartbeat + poller)")
 
-    print(f"\n[OK] Sistem hazir (mod: {SYSTEM_MODE})")
-    print("Dashboard icin: python -m terminal.dashboard")
-    print("Cikis icin Ctrl+C\n")
+    logger.info("✅ Sistem hazır")
+    logger.info("   Telegram: dinleniyor")
+    logger.info("   Sunucu relay: heartbeat + poll aktif")
+    logger.info("   Çıkış için Ctrl+C")
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n[System] Kapatılıyor...")
-        art_director.stop()
+        logger.info("Kapatılıyor...")
+        art.stop()
         log_event("system", "Sistem durduruldu")
 
 
