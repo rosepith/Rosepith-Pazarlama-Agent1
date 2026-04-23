@@ -1,0 +1,50 @@
+# Ortam ve gizli dosyalar — KESİNLİKLE GitHub'a gitme
+.env
+.env.*
+*.env
+secrets.py
+credentials.json
+
+# Veritabanı
+*.db
+*.sqlite
+*.sqlite3
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Sanal ortam
+venv/
+env/
+.venv/
+ENV/
+
+# Log dosyaları
+logs/
+*.log
+*.log.*
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Derleme
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Geçici
+tmp/
+temp/
+.tmp/
+agent-api/data/

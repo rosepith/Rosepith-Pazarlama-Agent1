@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python main.py)",
+      "Bash(pip show *)",
+      "Bash(pip install *)",
+      "Bash(gh api *)",
+      "WebFetch(domain:github.com)",
+      "Bash(python -c ' *)",
+      "Bash(taskkill /F /IM python.exe)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(notepad \"C:\\\\Users\\\\W10\\\\Desktop\\\\Rosepith-Pazarlama-Agent1-main\\\\.env\")",
+      "Bash(python -c \"from core.config import ROLE_YASIN_ID; print\\('Yasin ID:', ROLE_YASIN_ID\\)\")",
+      "Bash(tailscale up *)",
+      "Read(//c/Program Files/Tailscale//**)",
+      "Read(//c/Program Files \\(x86\\)/**)",
+      "Read(//c/Users/W10/AppData/Local/Programs/**)",
+      "Bash(\"/c/Program Files/Tailscale/tailscale.exe\" up)",
+      "Bash(\"/c/Program Files/Tailscale/tailscale.exe\" status)",
+      "Bash(\"/c/Program Files/Tailscale/tailscale.exe\" up --ssh)",
+      "Bash(powershell.exe -Command \"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0\")",
+      "Bash(powershell.exe -Command \"Get-Service sshd | Select-Object Name, Status, StartType; netstat -an | grep ':22'\")",
+      "Bash(python -c \"from starlette.middleware.base import BaseHTTPMiddleware; print\\('OK'\\)\")",
+      "Bash(ssh -o StrictHostKeyChecking=no rosekreatif@server.rosepith.org \"echo 'Bağlantı OK' && python3 --version && which pip3\")",
+      "Bash(ssh -o StrictHostKeyChecking=no -p 2222 rosekreatif@server.rosepith.org \"echo OK\")",
+      "Bash(ssh -o StrictHostKeyChecking=no rosekreatif@rosekreatif.com.tr \"echo OK\")",
+      "Bash(nmap -p 22,2222,2200,8022 server.rosepith.org)",
+      "Bash(ping -c 3 server.rosepith.org)",
+      "Bash(curl -s --connect-timeout 5 https://server.rosepith.org)",
+      "Bash(curl -s --connect-timeout 5 https://rosekreatif.com.tr)",
+      "Bash(sshpass -p '?Lp1uVI0nfe5nt$c' ssh -o StrictHostKeyChecking=no rosekreatif@159.253.37.186 'echo '\\\\''Bağlantı OK'\\\\'' && python3 --version && pwd')",
+      "Bash(python3 -)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('C:/Users/W10/Desktop/Rosepith-Pazarlama-Agent1-main/agents/art_director.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(taskkill //F //IM python.exe //T)",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object OwningProcess\")",
+      "Bash(powershell.exe -Command \"Stop-Process -Id 15456 -Force\")",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object OwningProcess,State\")"
+    ]
+  }
+}

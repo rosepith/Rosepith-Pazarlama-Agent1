@@ -1,0 +1,3 @@
+RewriteEngine On
+RewriteRule ^webhook$ webhook.php [L,QSA]
+RewriteRule ^webhook/$ webhook.php [L,QSA]
