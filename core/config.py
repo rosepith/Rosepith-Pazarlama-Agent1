@@ -16,11 +16,11 @@ ROLE_YASIN_ID            = YASIN_TELEGRAM_ID
 WHATSAPP_PHONE_NUMBER_ID     = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 WHATSAPP_BUSINESS_ACCOUNT_ID = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID")
 WHATSAPP_ACCESS_TOKEN        = os.getenv("WHATSAPP_ACCESS_TOKEN")
-WHATSAPP_VERIFY_TOKEN        = os.getenv("WHATSAPP_VERIFY_TOKEN", "rosepith_webhook_2026")
+WHATSAPP_VERIFY_TOKEN        = os.getenv("WHATSAPP_VERIFY_TOKEN")
 TEST_CUSTOMER_WHATSAPP       = os.getenv("TEST_CUSTOMER_WHATSAPP","")
 
 # Hibrit relay
-RELAY_SECRET     = os.getenv("RELAY_SECRET", "rosepith_relay_2026")
+RELAY_SECRET     = os.getenv("RELAY_SECRET")
 SERVER_RELAY_URL = os.getenv("SERVER_RELAY_URL", "https://rosekreatif.com.tr/agent-api/")
 
 SYSTEM_MODE = os.getenv("SYSTEM_MODE", "full")
