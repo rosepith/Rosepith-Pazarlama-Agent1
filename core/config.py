@@ -16,11 +16,11 @@ ROLE_YASIN_ID            = YASIN_TELEGRAM_ID
 WHATSAPP_PHONE_NUMBER_ID     = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 WHATSAPP_BUSINESS_ACCOUNT_ID = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID")
 WHATSAPP_ACCESS_TOKEN        = os.getenv("WHATSAPP_ACCESS_TOKEN")
-WHATSAPP_VERIFY_TOKEN        = os.getenv("WHATSAPP_VERIFY_TOKEN", "rosepith_webhook_2026")
+WHATSAPP_VERIFY_TOKEN        = os.getenv("WHATSAPP_VERIFY_TOKEN")
 TEST_CUSTOMER_WHATSAPP       = os.getenv("TEST_CUSTOMER_WHATSAPP","")
 
 # Hibrit relay
-RELAY_SECRET     = os.getenv("RELAY_SECRET", "rosepith_relay_2026")
+RELAY_SECRET     = os.getenv("RELAY_SECRET")
 SERVER_RELAY_URL = os.getenv("SERVER_RELAY_URL", "https://rosekreatif.com.tr/agent-api/")
 
 SYSTEM_MODE = os.getenv("SYSTEM_MODE", "full")
@@ -42,3 +42,25 @@ while True:
 PERSONEL: dict[str, str] = {}
 ROLE_PERSONNEL_IDS: list[str] = []
 ROLE_CUSTOMER_IDS:  list[str] = []
+
+# Personel Mail: {isim_lower: mail}
+PERSONEL_MAIL: dict[str, str] = {}
+_j = 1
+while True:
+    _wa   = os.getenv(f"PERSONEL_{_j}_WHATSAPP","").strip()
+    _isim = os.getenv(f"PERSONEL_{_j}_ISIM","").strip()
+    _mail = os.getenv(f"PERSONEL_{_j}_MAIL","").strip()
+    if not _wa and not _isim: break
+    if _isim and _mail:
+        PERSONEL_MAIL[_isim.lower()] = _mail
+    _j += 1
+
+# Yandex Mail (Art Direktör)
+YANDEX_MAIL         = os.getenv("YANDEX_MAIL", "artdirektor@rosepith.net")
+YANDEX_APP_PASSWORD = os.getenv("YANDEX_APP_PASSWORD", "")
+
+# Google Maps Places API
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
+
+# Anthropic Claude API
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")

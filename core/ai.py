@@ -5,6 +5,7 @@
 import threading
 import requests
 import logging
+import time
 
 from google import genai
 from google.genai import types as genai_types
@@ -191,17 +192,27 @@ def get_response(user_message, role, history, is_off_hours=False,
 
 def get_response_personnel(user_message, history, is_off_hours=False,
                             is_weekend=False, user_profile=""):
-    """Personel için: SADECE Gemini Flash. Hata → Yasin bildir, None döner."""
+    """Personel için: SADECE Gemini Flash. 503/429 → 2 retry (5s ara). Hata → Yasin bildir, None döner."""
     system_prompt = build_system_prompt("personnel", is_off_hours, is_weekend, user_profile)
-    try:
-        text = _gemini(system_prompt, history, user_message)
-        logger.info("Gemini personel yanıt")
-        return text
-    except Exception as e:
-        logger.error(f"Gemini personel hata: {e}")
-        threading.Thread(
-            target=_notify_yasin,
-            args=(f"⚠️ Personel AI yanıt veremedi (Gemini hata). Elle müdahale gerekebilir.\nHata: {str(e)[:100]}",),
-            daemon=True
-        ).start()
-        return None
+    last_err = None
+    for attempt in range(3):  # 0, 1, 2
+        try:
+            text = _gemini(system_prompt, history, user_message)
+            logger.info(f"Gemini personel yanıt (deneme {attempt + 1})")
+            return text
+        except Exception as e:
+            last_err = e
+            err = str(e)
+            if any(k in err for k in ["503", "429", "UNAVAILABLE", "quota", "rate"]):
+                logger.warning(f"Gemini personel geçici hata (deneme {attempt + 1}): {err[:80]}")
+                if attempt < 2:
+                    time.sleep(5)
+                    continue
+            break  # Geçici hata değilse retry yok
+    logger.error(f"Gemini personel hata (3 deneme tükendi): {last_err}")
+    threading.Thread(
+        target=_notify_yasin,
+        args=(f"⚠️ Personel AI yanıt veremedi (Gemini hata). Elle müdahale gerekebilir.\nHata: {str(last_err)[:100]}",),
+        daemon=True
+    ).start()
+    return None

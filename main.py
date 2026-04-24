@@ -36,9 +36,29 @@ def main():
     start_relay()
     log_event("system", "Sunucu relay aktif (heartbeat + poller)")
 
+    # Tatil cache — yıl başında yükle
+    from core.holiday_checker import _ensure_year
+    import datetime
+    _ensure_year(datetime.date.today().year)
+    log_event("system", "Tatil cache hazır")
+
+    # Satış otomasyonu — sabah brief + dürtmece
+    from agents.sales_automation import SalesAutomationAgent
+    sales = SalesAutomationAgent()
+    sales.start()
+    log_event("system", "Satış otomasyonu aktif")
+
+    # Akşam raporu
+    from agents.evening_report import EveningReportAgent
+    evening = EveningReportAgent()
+    evening.start()
+    log_event("system", "Akşam raporu ajanı aktif")
+
     logger.info("✅ Sistem hazır")
     logger.info("   Telegram: dinleniyor")
     logger.info("   Sunucu relay: heartbeat + poll aktif")
+    logger.info("   Satış otomasyonu: 09:30 / 12:00 / 15:00 / 17:30")
+    logger.info("   Akşam raporu: 18:00")
     logger.info("   Çıkış için Ctrl+C")
 
     try:
@@ -47,6 +67,8 @@ def main():
     except KeyboardInterrupt:
         logger.info("Kapatılıyor...")
         art.stop()
+        sales.stop()
+        evening.stop()
         log_event("system", "Sistem durduruldu")
 
 
