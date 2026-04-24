@@ -1,0 +1,177 @@
+# Rosepith — Yandex Mail Handler
+# IMAP: imap.yandex.com:993 (SSL)
+# SMTP: smtp.yandex.com:465 (SSL)
+# Thread takibi: mail_threads tablosu
+
+import imaplib
+import smtplib
+import email
+import logging
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.header import decode_header
+
+logger = logging.getLogger(__name__)
+
+
+def _init_table():
+    from core.database import get_connection
+    conn = get_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS mail_threads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT UNIQUE,
+            in_reply_to TEXT,
+            from_addr TEXT,
+            to_addr TEXT,
+            subject TEXT,
+            body TEXT,
+            direction TEXT,
+            status TEXT DEFAULT 'new',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _get_creds():
+    from core.config import YANDEX_MAIL, YANDEX_APP_PASSWORD
+    return YANDEX_MAIL, YANDEX_APP_PASSWORD
+
+
+def _decode_str(s) -> str:
+    if not s:
+        return ""
+    parts = decode_header(s)
+    result = ""
+    for part, enc in parts:
+        if isinstance(part, bytes):
+            result += part.decode(enc or "utf-8", errors="replace")
+        else:
+            result += str(part)
+    return result.strip()
+
+
+def _get_body(msg) -> str:
+    """Mail içeriğini düz metin olarak çek."""
+    if msg.is_multipart():
+        for part in msg.walk():
+            ct = part.get_content_type()
+            cd = str(part.get("Content-Disposition", ""))
+            if ct == "text/plain" and "attachment" not in cd:
+                payload = part.get_payload(decode=True)
+                charset = part.get_content_charset() or "utf-8"
+                return payload.decode(charset, errors="replace")
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            charset = msg.get_content_charset() or "utf-8"
+            return payload.decode(charset, errors="replace")
+    return ""
+
+
+def poll_new_mails(limit: int = 20) -> list[dict]:
+    """INBOX'taki okunmamış mailleri çek, DB'ye kaydet, liste döndür."""
+    mail_addr, app_pass = _get_creds()
+    if not mail_addr or not app_pass:
+        logger.warning("Yandex credentials eksik — mail polling atlandı")
+        return []
+
+    _init_table()
+    results = []
+    try:
+        imap = imaplib.IMAP4_SSL("imap.yandex.com", 993)
+        imap.login(mail_addr, app_pass)
+        imap.select("INBOX")
+
+        _, data = imap.search(None, "UNSEEN")
+        ids = data[0].split() if data[0] else []
+        ids = ids[-limit:]  # Son N tane
+
+        for uid in ids:
+            try:
+                _, msg_data = imap.fetch(uid, "(RFC822)")
+                raw = msg_data[0][1]
+                msg = email.message_from_bytes(raw)
+
+                m = {
+                    "message_id":  msg.get("Message-ID", f"<uid-{uid.decode()}>").strip(),
+                    "in_reply_to": msg.get("In-Reply-To", "").strip(),
+                    "from_addr":   _decode_str(msg.get("From", "")),
+                    "subject":     _decode_str(msg.get("Subject", "")),
+                    "body":        _get_body(msg).strip()[:3000],
+                }
+                results.append(m)
+
+                # DB'ye kaydet (tekrar gelirse ignore)
+                from core.database import get_connection
+                conn = get_connection()
+                conn.execute(
+                    """INSERT OR IGNORE INTO mail_threads
+                       (message_id, in_reply_to, from_addr, to_addr, subject, body, direction)
+                       VALUES (?, ?, ?, ?, ?, ?, 'in')""",
+                    (m["message_id"], m["in_reply_to"], m["from_addr"],
+                     mail_addr, m["subject"], m["body"])
+                )
+                conn.commit()
+                conn.close()
+
+                # Okundu işaretle
+                imap.store(uid, "+FLAGS", "\\Seen")
+
+            except Exception as e:
+                logger.error(f"Mail parse hatası (uid={uid}): {e}")
+
+        imap.logout()
+        logger.info(f"Mail polling: {len(results)} yeni mail")
+
+    except Exception as e:
+        logger.error(f"IMAP bağlantı hatası: {e}")
+
+    return results
+
+
+def send_mail(to: str, subject: str, body: str,
+              reply_to_id: str = None) -> bool:
+    """Mail gönder. reply_to_id varsa thread'e bağla."""
+    mail_addr, app_pass = _get_creds()
+    if not mail_addr or not app_pass:
+        logger.warning("Yandex credentials eksik — mail gönderilemedi")
+        return False
+
+    _init_table()
+    try:
+        msg = MIMEMultipart()
+        msg["From"]    = mail_addr
+        msg["To"]      = to
+        msg["Subject"] = subject
+        if reply_to_id:
+            msg["In-Reply-To"] = reply_to_id
+            msg["References"]  = reply_to_id
+
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        with smtplib.SMTP_SSL("smtp.yandex.com", 465, timeout=15) as smtp:
+            smtp.login(mail_addr, app_pass)
+            smtp.send_message(msg)
+
+        # DB kaydet
+        from core.database import get_connection
+        conn = get_connection()
+        conn.execute(
+            """INSERT INTO mail_threads
+               (message_id, in_reply_to, from_addr, to_addr, subject, body, direction, status)
+               VALUES (?, ?, ?, ?, ?, ?, 'out', 'sent')""",
+            (msg.get("Message-ID", ""), reply_to_id or "",
+             mail_addr, to, subject, body[:3000])
+        )
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Mail gönderildi → {to} | {subject}")
+        return True
+
+    except Exception as e:
+        logger.error(f"SMTP hatası: {e}")
+        return False

@@ -120,37 +120,9 @@ def _handle_customer(phone: str, name: str, text: str):
 # ─── WhatsApp: Personel ────────────────────────────────────────────────────────
 
 def _handle_personnel(phone: str, name: str, text: str):
-    now     = datetime.datetime.now()
-    off     = not _is_work_hours(now)
-    weekend = _is_weekend(now)
-    holiday = _is_holiday(now)
-    isim    = PERSONEL_WHATSAPP.get(phone, name or phone)
-
-    save_message(phone, "personnel", "in", text)
-
-    # Mesai dışı: kuyruğa al
-    if weekend or off or holiday:
-        add_to_queue(phone, "personnel", text)
-        reply = "Mesai dışı. Göreviniz alındı, mesai başında işleniyor."
-        _send_whatsapp(phone, reply)
-        save_message(phone, "personnel", "out", reply)
-        return
-
-    history = load_history(phone, limit=40)
-    profile = get_user_profile(phone)
-
-    reply = get_response_personnel(
-        user_message=text, history=history,
-        is_off_hours=False, is_weekend=False, user_profile=profile
-    )
-
-    if reply is None:
-        # Gemini hata verdi → Yasin bildirildi (ai.py içinde), personele sessiz fallback
-        reply = "Mesajınız alındı, ilgileniyorum."
-
-    _typing_delay(reply)
-    _send_whatsapp(phone, reply)
-    save_message(phone, "personnel", "out", reply)
+    # Yeni personel destek ajanına yönlendir
+    from agents.personnel_support import handle_whatsapp_personnel
+    handle_whatsapp_personnel(phone, name, text)
 
 
 # ─── Ana WhatsApp handler ─────────────────────────────────────────────────────

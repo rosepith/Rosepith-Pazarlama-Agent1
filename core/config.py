@@ -42,3 +42,19 @@ while True:
 PERSONEL: dict[str, str] = {}
 ROLE_PERSONNEL_IDS: list[str] = []
 ROLE_CUSTOMER_IDS:  list[str] = []
+
+# Personel Mail: {isim_lower: mail}
+PERSONEL_MAIL: dict[str, str] = {}
+_j = 1
+while True:
+    _wa   = os.getenv(f"PERSONEL_{_j}_WHATSAPP","").strip()
+    _isim = os.getenv(f"PERSONEL_{_j}_ISIM","").strip()
+    _mail = os.getenv(f"PERSONEL_{_j}_MAIL","").strip()
+    if not _wa and not _isim: break
+    if _isim and _mail:
+        PERSONEL_MAIL[_isim.lower()] = _mail
+    _j += 1
+
+# Yandex Mail (Art Direktör)
+YANDEX_MAIL         = os.getenv("YANDEX_MAIL", "artdirektor@rosepith.net")
+YANDEX_APP_PASSWORD = os.getenv("YANDEX_APP_PASSWORD", "")
