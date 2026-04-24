@@ -58,3 +58,6 @@ while True:
 # Yandex Mail (Art Direktör)
 YANDEX_MAIL         = os.getenv("YANDEX_MAIL", "artdirektor@rosepith.net")
 YANDEX_APP_PASSWORD = os.getenv("YANDEX_APP_PASSWORD", "")
+
+# Google Maps Places API
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")

@@ -3,6 +3,7 @@
 # 12:00 / 15:00 / 17:30 → Nazik dürtmece
 # 17:30 → Rapor hatırlatma
 # 18:00 → Akşam raporuna katkı (evening_report ile koordineli)
+# Google Maps Places API (New) ile lead çekme
 
 import threading
 import datetime
@@ -14,13 +15,266 @@ from core.config import (
     PERSONEL_WHATSAPP,
     WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN,
     TELEGRAM_BOT_TOKEN, YASIN_TELEGRAM_ID,
-    OPENAI_API_KEY,
+    OPENAI_API_KEY, GOOGLE_MAPS_API_KEY,
 )
 from core.database import get_connection, log_event
 from core.holiday_checker import is_holiday, is_work_hours, get_season_context
 
 logger = logging.getLogger(__name__)
 AGENT_NAME = "sales_automation"
+
+# ─── Sezon takvimi ────────────────────────────────────────────────────────────
+
+SEZON_SEKTORLER = {
+    1:  ["mobilya", "ısıtma sistemleri", "kış giyim mağazası"],
+    2:  ["mobilya", "tadilat firması", "boya badana"],
+    3:  ["bahçe peyzaj", "çocuk parkı ekipmanları", "tohum fide bahçe merkezi"],
+    4:  ["peyzaj firması", "bahçe düzenleme", "çocuk parkı"],
+    5:  ["düğün salonu", "kuaför güzellik salonu", "fotoğrafçı düğün"],
+    6:  ["otel", "tur firması", "klima servisi"],
+    7:  ["otel", "tatil köyü", "klima montaj servisi"],
+    8:  ["klima servisi", "otel", "plaj tesisi"],
+    9:  ["kırtasiye", "kreş", "dershane etüt merkezi"],
+    10: ["düğün salonu", "davet organizasyon", "kına organizasyon"],
+    11: ["düğün organizasyon", "davet firması", "catering"],
+    12: ["e-ticaret", "kuyumcu", "çiçekçi"],
+}
+
+MAPS_BOLGE = "İzmir"  # Başlangıçta sabit, ileride dinamik
+
+
+def get_current_sector() -> str:
+    """Bu ayın hedef sektörünü döndür (ilk sektör)."""
+    month = datetime.date.today().month
+    return SEZON_SEKTORLER.get(month, ["işletme"])[0]
+
+
+def get_current_sector_list() -> list[str]:
+    """Bu ayın tüm hedef sektörlerini döndür."""
+    month = datetime.date.today().month
+    return SEZON_SEKTORLER.get(month, ["işletme"])
+
+
+# ─── Customers tablosu ────────────────────────────────────────────────────────
+
+def _init_customers_table():
+    conn = get_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            isim TEXT,
+            telefon TEXT UNIQUE,
+            adres TEXT,
+            sektor TEXT,
+            web_sitesi TEXT,
+            rating REAL,
+            rating_count INTEGER,
+            place_types TEXT,
+            atanan_personel TEXT,
+            atama_tarihi TEXT,
+            son_durum TEXT DEFAULT 'yeni',
+            maps_query TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _is_recently_assigned(telefon: str, gun: int = 30) -> bool:
+    """Son 30 günde bu telefon atandı mı?"""
+    if not telefon:
+        return False
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT id FROM customers
+           WHERE telefon=?
+           AND atama_tarihi >= date('now', ?)""",
+        (telefon, f"-{gun} days")
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def _save_customer(isim: str, telefon: str, adres: str, sektor: str,
+                   web_sitesi: str, rating: float, rating_count: int,
+                   place_types: str, atanan_personel: str,
+                   maps_query: str) -> bool:
+    """Müşteriyi kaydet. Daha önce varsa False döner."""
+    _init_customers_table()
+    try:
+        conn = get_connection()
+        conn.execute(
+            """INSERT INTO customers
+               (isim, telefon, adres, sektor, web_sitesi, rating, rating_count,
+                place_types, atanan_personel, atama_tarihi, maps_query)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (isim, telefon or None, adres, sektor, web_sitesi,
+             rating, rating_count, place_types, atanan_personel,
+             datetime.date.today().isoformat(), maps_query)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception:
+        # UNIQUE constraint — telefon zaten var
+        return False
+
+
+# ─── Google Maps Places API (New) ─────────────────────────────────────────────
+
+# Sunucu proxy üzerinden istek — API key sunucuya IP kısıtlı
+MAPS_PROXY_URL = "https://rosekreatif.com.tr/agent-api/maps_proxy.php"
+
+
+def fetch_maps_leads(sektor: str, bolge: str = MAPS_BOLGE,
+                     limit: int = 20) -> list[dict]:
+    """
+    Google Maps Places API (New) ile işletme listesi çek.
+    Sunucu proxy kullanır (IP kısıtlı key).
+    Ham veri döndür — zenginleştirme yapma.
+    """
+    from core.config import RELAY_SECRET
+    query = f"{sektor} {bolge}"
+    payload = {
+        "textQuery": query,
+        "pageSize":  min(limit, 20),
+        "languageCode": "tr",
+    }
+    headers = {
+        "X-Relay-Secret": RELAY_SECRET,
+        "Content-Type":   "application/json",
+    }
+
+    try:
+        resp = requests.post(
+            MAPS_PROXY_URL, headers=headers, json=payload, timeout=20
+        )
+        if resp.status_code != 200:
+            logger.error(f"Maps proxy hata {resp.status_code}: {resp.text[:200]}")
+            return []
+
+        data = resp.json()
+        if "error" in data:
+            logger.error(f"Maps API hata: {data['error']}")
+            return []
+
+        places = data.get("places", [])
+        logger.info(f"Maps: '{query}' → {len(places)} sonuç")
+
+        results = []
+        for p in places:
+            results.append({
+                "isim":         p.get("displayName", {}).get("text", ""),
+                "telefon":      p.get("internationalPhoneNumber", ""),
+                "adres":        p.get("formattedAddress", ""),
+                "web_sitesi":   p.get("websiteUri", ""),
+                "rating":       float(p.get("rating", 0.0)),
+                "rating_count": int(p.get("userRatingCount", 0)),
+                "place_types":  ",".join(p.get("types", []))[:200],
+                "query":        query,
+            })
+        return results
+
+    except Exception as e:
+        logger.error(f"Maps proxy istek hatası: {e}")
+        return []
+
+
+def assign_leads_to_personel(leads: list[dict],
+                              sektor: str) -> dict[str, list[dict]]:
+    """
+    20 adayı filtrele (son 30 gün çakışma hariç),
+    10'u Eda Hanım'a, 10'u Asuman Hanım'a ata.
+    Aynı işletme iki hanıma gitmiyor.
+    """
+    _init_customers_table()
+    personeller = _get_satis_personeli()
+    if len(personeller) < 2:
+        logger.warning("assign_leads: 2 satış personeli bulunamadı")
+        # Tek personel varsa tüm listeyi ona ver
+        if personeller:
+            return {personeller[0]["hitap"]: leads[:10]}
+        return {}
+
+    # Çakışma filtresi
+    temiz = []
+    for lead in leads:
+        tel = lead.get("telefon", "").strip()
+        if tel and _is_recently_assigned(tel):
+            logger.info(f"Çakışma atlandı: {lead['isim']} ({tel})")
+            continue
+        temiz.append(lead)
+
+    # İlk 20'yi al, yarıya böl
+    temiz = temiz[:20]
+    yari  = len(temiz) // 2 or len(temiz)
+
+    p0_hitap = personeller[0]["hitap"]  # Eda Hanım
+    p1_hitap = personeller[1]["hitap"]  # Asuman Hanım
+
+    return {
+        p0_hitap: temiz[:yari],
+        p1_hitap: temiz[yari:yari * 2],
+    }
+
+
+def run_maps_lead_fetch(sektor: str = None,
+                        bolge: str = MAPS_BOLGE,
+                        verbose: bool = False) -> dict:
+    """
+    Maps'ten lead çek, çakışma kontrolü yap, customers tablosuna kaydet.
+    verbose=True → ekrana yazdır (CLI test için).
+    Sonuç: {personel: [kayıt listesi], ...}
+    """
+    if sektor is None:
+        sektor = get_current_sector()
+
+    if verbose:
+        print(f"\n🗺  Maps lead çekiliyor: '{sektor}' / {bolge}")
+
+    leads = fetch_maps_leads(sektor, bolge, limit=20)
+    if not leads:
+        if verbose:
+            print("❌ Sonuç gelmedi (API hatası veya key yok)")
+        return {}
+
+    atamalar = assign_leads_to_personel(leads, sektor)
+    ozet = {}
+
+    for personel_hitap, liste in atamalar.items():
+        kaydedilenler = []
+        for lead in liste:
+            ok = _save_customer(
+                isim          = lead["isim"],
+                telefon       = lead["telefon"],
+                adres         = lead["adres"],
+                sektor        = sektor,
+                web_sitesi    = lead["web_sitesi"],
+                rating        = lead["rating"],
+                rating_count  = lead["rating_count"],
+                place_types   = lead["place_types"],
+                atanan_personel = personel_hitap,
+                maps_query    = lead["query"],
+            )
+            if ok:
+                kaydedilenler.append(lead)
+                if verbose:
+                    tel = lead["telefon"] or "tel yok"
+                    web = "✓ web" if lead["web_sitesi"] else "✗ web"
+                    print(f"  [{personel_hitap[:3]}] {lead['isim'][:35]:<35} {tel:<18} {web} ⭐{lead['rating']}")
+            else:
+                if verbose:
+                    print(f"  [ATLA] {lead['isim']} — zaten kayıtlı")
+
+        ozet[personel_hitap] = kaydedilenler
+        if verbose:
+            print(f"  → {personel_hitap}: {len(kaydedilenler)} yeni kayıt")
+
+    log_event(AGENT_NAME, f"Maps lead fetch: {sektor}/{bolge} — "
+              + " | ".join(f"{p}: {len(v)}" for p, v in ozet.items()))
+    return ozet
+
 
 # ─── Satış personeli ──────────────────────────────────────────────────────────
 
