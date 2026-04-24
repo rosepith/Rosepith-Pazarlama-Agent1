@@ -48,3 +48,6 @@ tmp/
 temp/
 .tmp/
 agent-api/data/
+  
+# Webhook gizli config  
+deploy/config.php  

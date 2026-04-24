@@ -1,0 +1,12 @@
+<?php
+// Rosepith Webhook Config — ORNEK DOSYA
+// Gercek degerler icin bu dosyayi config.php olarak kopyalayin:
+//   cp config.php.example config.php
+// config.php git tarafından takip edilmez (.gitignore).
+
+define('VERIFY_TOKEN',    'BURAYA_WEBHOOK_VERIFY_TOKEN');
+define('ACCESS_TOKEN',    'BURAYA_WHATSAPP_ACCESS_TOKEN');
+define('PHONE_NUMBER_ID', 'BURAYA_WHATSAPP_PHONE_NUMBER_ID');
+define('TELEGRAM_TOKEN',  'BURAYA_TELEGRAM_BOT_TOKEN');
+define('TELEGRAM_CHAT_ID','BURAYA_TELEGRAM_CHAT_ID');
+define('LOG_FILE',        __DIR__ . '/../logs/webhook.log');

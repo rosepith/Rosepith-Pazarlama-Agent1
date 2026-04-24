@@ -1,13 +1,14 @@
 <?php
 // Rosepith WhatsApp Webhook Handler
-// Meta Business API webhook doğrulama ve mesaj alma
+// Tüm gizli bilgiler deploy/config.php dosyasından gelir (gitignore'd)
 
-define('VERIFY_TOKEN', 'rosepith_webhook_2026');
-define('ACCESS_TOKEN', 'EAAlKIK79bnYBRcaRWZCaGqHBCfD6giZCELHMo8zIf60tL5uRb3I0uRpOJem5BbwZAptCpEdVc0kZAvYDZBl8InZBWZClIDaPZAqhzJfweY4Lg1dyZAHCSENvCPxRKMgIWcK9tBnAp56kVUroq6ySmF2FAlTI1yoZBmdzxWNmukV1ikBZA0ZB2hDZAoaPCDX8l5FfFjqc5ddqDAiUB4ugUjgsShZCUGtH0ScVhuSGeUoHe2j2WiILPmQLlbe8TQ8VXt55HsR9azwUYlXOrcgSo7un1ntooZAL22IE7zW7bpsMQZDZD');
-define('PHONE_NUMBER_ID', '1059184707283584');
-define('LOG_FILE', __DIR__ . '/../logs/webhook.log');
-define('TELEGRAM_TOKEN', '8532355893:AAHyoafvS0lanBaj9FFtNT16fUy2UMJ7M3c');
-define('TELEGRAM_CHAT_ID', '8694241923');
+$config_file = __DIR__ . '/config.php';
+if (!file_exists($config_file)) {
+    http_response_code(500);
+    echo json_encode(['error' => 'config.php bulunamadi']);
+    exit;
+}
+require_once $config_file;
 
 header('Content-Type: application/json');
 header('ngrok-skip-browser-warning: true');
