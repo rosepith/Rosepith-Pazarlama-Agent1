@@ -7,6 +7,7 @@ import imaplib
 import smtplib
 import email
 import logging
+import uuid
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import decode_header
@@ -143,9 +144,10 @@ def send_mail(to: str, subject: str, body: str,
     _init_table()
     try:
         msg = MIMEMultipart()
-        msg["From"]    = mail_addr
-        msg["To"]      = to
-        msg["Subject"] = subject
+        msg["From"]       = mail_addr
+        msg["To"]         = to
+        msg["Subject"]    = subject
+        msg["Message-ID"] = f"<{uuid.uuid4()}@rosepith.net>"
         if reply_to_id:
             msg["In-Reply-To"] = reply_to_id
             msg["References"]  = reply_to_id

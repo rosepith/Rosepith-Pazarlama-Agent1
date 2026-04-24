@@ -15,7 +15,7 @@ from core.config import (
     PERSONEL_WHATSAPP,
     WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN,
     TELEGRAM_BOT_TOKEN, YASIN_TELEGRAM_ID,
-    OPENAI_API_KEY, GOOGLE_MAPS_API_KEY,
+    OPENAI_API_KEY, GOOGLE_MAPS_API_KEY, ANTHROPIC_API_KEY,
 )
 from core.database import get_connection, log_event
 from core.holiday_checker import is_holiday, is_work_hours, get_season_context
@@ -499,6 +499,374 @@ def run_durtmece(saat_key: str):
         _send_wa(p["phone"], msg)
         _mark_sent(p["hitap"], event)
         log_event(AGENT_NAME, f"Dürtmece {saat_key} → {p['hitap']}")
+
+
+# ─── Zenginleştirme (Claude → GPT-4o fallback) ───────────────────────────────
+
+ENRICHMENT_PROMPT_TMPL = """Sen Rosepith Dijital Ajans'ın satış koçusun.
+Aşağıdaki işletme bilgileri verildi. {personel_hitap} için bir satış dosyası hazırla.
+
+İŞLETME:
+- İsim: {isim}
+- Sektör: {sektor}
+- Adres: {adres}
+- Web sitesi: {web}
+- Google puanı: {rating} ({rating_count} yorum)
+- Kategori: {types}
+- Bölge/sezon notu: {sezon}
+
+ÇIKTI FORMATI (tam bu başlıklarla):
+## NE SUNABİLİRSİN
+(Pazarlama dilinde, 2-3 paragraf. Bu işletmenin ihtiyacı ne? Hangi Rosepith hizmetini öneririz? Web sitesi yoksa web öner, varsa Google Ads öner. Robotik değil, gerçek satış koçu gibi yaz.)
+
+## ARAMA TAKTİĞİ
+(2-3 madde. Ne desin, nasıl açsın telefonu, ilk cümle nasıl olsun?)
+
+## SEZON BAĞLANTISI
+(1-2 cümle. Neden şimdi aramalı, neden bu ay doğru zaman?)
+
+## REKABET DURUMU
+(1-2 cümle. Bu sektörde rakipler ne yapıyor, neden Rosepith fark yaratır?)
+
+KURALLAR:
+- Satış koçu tonu, robotik değil
+- Teknik dil yok
+- Fiyat yazma
+- Türkçe, {personel_hitap} saygılı hitap kullan
+- Kısa, öz, aksiyon odaklı"""
+
+
+def _parse_enrichment(text: str) -> dict:
+    """Claude/GPT çıktısını bölümlere ayır."""
+    sections = {
+        "ne_sunabilirsin":  "",
+        "arama_taktigi":    "",
+        "sezon_baglantisi": "",
+        "rekabet_durumu":   "",
+    }
+    keys = [
+        ("## NE SUNABİLİRSİN",   "ne_sunabilirsin"),
+        ("## ARAMA TAKTİĞİ",     "arama_taktigi"),
+        ("## SEZON BAĞLANTISI",   "sezon_baglantisi"),
+        ("## REKABET DURUMU",     "rekabet_durumu"),
+    ]
+    for i, (header, key) in enumerate(keys):
+        start = text.find(header)
+        if start == -1:
+            continue
+        start += len(header)
+        # Bir sonraki başlığa kadar al
+        end = len(text)
+        for next_header, _ in keys[i + 1:]:
+            pos = text.find(next_header, start)
+            if pos != -1:
+                end = pos
+                break
+        sections[key] = text[start:end].strip()
+    return sections
+
+
+def _notify_yasin_sync(text: str):
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": YASIN_TELEGRAM_ID, "text": text},
+            timeout=8
+        )
+    except Exception:
+        pass
+
+
+def enrich_customer_with_claude(customer: dict, personel_hitap: str,
+                                  sezon: str = "") -> dict:
+    """
+    Müşteri verisini AI ile zenginleştir.
+    Önce: Anthropic Claude API (ANTHROPIC_API_KEY varsa)
+    Fallback: GPT-4o → GPT-4o-mini
+    Döndürür: {ne_sunabilirsin, arama_taktigi, sezon_baglantisi, rekabet_durumu,
+               model_used, is_fallback}
+    """
+    prompt = ENRICHMENT_PROMPT_TMPL.format(
+        personel_hitap = personel_hitap,
+        isim           = customer.get("isim", "?"),
+        sektor         = customer.get("sektor", "?"),
+        adres          = customer.get("adres", ""),
+        web            = customer.get("web_sitesi") or "YOK",
+        rating         = customer.get("rating", 0),
+        rating_count   = customer.get("rating_count", 0),
+        types          = customer.get("place_types", "")[:80],
+        sezon          = sezon or get_season_context(),
+    )
+
+    # ── 1. Claude API ────────────────────────────────────────────────────────
+    if ANTHROPIC_API_KEY:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            msg = client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=600,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            text = msg.content[0].text.strip()
+            parsed = _parse_enrichment(text)
+            parsed["model_used"]  = "claude-sonnet-4-5"
+            parsed["is_fallback"] = False
+            logger.info(f"Claude brief: {customer.get('isim','?')[:30]}")
+            return parsed
+        except Exception as e:
+            logger.warning(f"Claude API hata: {e}")
+            threading.Thread(
+                target=_notify_yasin_sync,
+                args=(f"⚠️ W10 Claude erişilemez, brief fallback devrede.\nHata: {str(e)[:100]}",),
+                daemon=True
+            ).start()
+
+    # ── 2. GPT-4o ─────────────────────────────────────────────────────────────
+    if OPENAI_API_KEY:
+        for model in ("gpt-4o", "gpt-4o-mini"):
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=OPENAI_API_KEY)
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=600, temperature=0.7
+                )
+                text = resp.choices[0].message.content.strip()
+                parsed = _parse_enrichment(text)
+                parsed["model_used"]  = model
+                parsed["is_fallback"] = True
+                logger.info(f"{model} brief (fallback): {customer.get('isim','?')[:30]}")
+                return parsed
+            except Exception as e:
+                logger.warning(f"{model} brief hata: {e}")
+
+    # ── 3. Tamamen başarısız ──────────────────────────────────────────────────
+    logger.error(f"Tüm modeller başarısız — {customer.get('isim','?')}")
+    return {
+        "ne_sunabilirsin":  "Brief üretilemedi.",
+        "arama_taktigi":    "Brief üretilemedi.",
+        "sezon_baglantisi": "Brief üretilemedi.",
+        "rekabet_durumu":   "Brief üretilemedi.",
+        "model_used":       "none",
+        "is_fallback":      True,
+    }
+
+
+def _save_brief(customer_id: int, brief: dict):
+    """customer_briefs tablosuna kaydet."""
+    conn = get_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS customer_briefs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER,
+            ne_sunabilirsin TEXT,
+            arama_taktigi TEXT,
+            sezon_baglantisi TEXT,
+            rekabet_durumu TEXT,
+            model_used TEXT,
+            is_fallback INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        """INSERT INTO customer_briefs
+           (customer_id, ne_sunabilirsin, arama_taktigi,
+            sezon_baglantisi, rekabet_durumu, model_used, is_fallback)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (customer_id,
+         brief.get("ne_sunabilirsin", ""),
+         brief.get("arama_taktigi", ""),
+         brief.get("sezon_baglantisi", ""),
+         brief.get("rekabet_durumu", ""),
+         brief.get("model_used", ""),
+         int(brief.get("is_fallback", False)))
+    )
+    conn.commit()
+    conn.close()
+
+
+def _update_customer_status(customer_id: int, status: str):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE customers SET son_durum=? WHERE id=?",
+        (status, customer_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+# ─── Mail içeriği oluştur ────────────────────────────────────────────────────
+
+def _build_brief_mail(personel_hitap: str,
+                       musteriler_briefs: list[dict],
+                       sektor: str,
+                       fallback_note: bool = False) -> str:
+    """Zenginleştirilmiş müşteri listesinden mail metni oluştur."""
+    tarih = datetime.date.today().strftime("%d %B %Y")
+
+    lines = [
+        f"Merhaba {personel_hitap},",
+        "",
+        f"Bugün için {len(musteriler_briefs)} potansiyel müşteri hazırladık. "
+        f"Bu ay {sektor} sezonu — yaklaşımlar aşağıda.",
+        "",
+        "=" * 60,
+    ]
+
+    for i, mb in enumerate(musteriler_briefs, 1):
+        c = mb["customer"]
+        b = mb["brief"]
+
+        web_str = c.get("web_sitesi") or "YOK ⚠️"
+        rating_str = f"{c.get('rating', 0)} / {c.get('rating_count', 0)} yorum"
+
+        lines += [
+            "",
+            f"─── İŞLETME {i}: {c.get('isim', '?')} ───",
+            f"📞 Telefon : {c.get('telefon') or 'Bilgi yok'}",
+            f"📍 Adres   : {c.get('adres', '')}",
+            f"🌐 Web     : {web_str}",
+            f"⭐ Puan    : {rating_str}",
+            "",
+            "💡 NE SUNABİLİRSİN:",
+            b.get("ne_sunabilirsin", ""),
+            "",
+            "🎯 ARAMA TAKTİĞİ:",
+            b.get("arama_taktigi", ""),
+            "",
+            "📅 SEZON BAĞLANTISI:",
+            b.get("sezon_baglantisi", ""),
+            "",
+            "🏆 REKABET DURUMU:",
+            b.get("rekabet_durumu", ""),
+            "",
+            "─" * 50,
+        ]
+
+    lines += [
+        "",
+        f"Bol şans {personel_hitap}, akşam raporunuzu beklerim 🌟",
+        "",
+        "Rosepith Sistem",
+    ]
+
+    if fallback_note:
+        lines += [
+            "",
+            "─" * 50,
+            "Not: Bu brief'in bir kısmı bakım çalışması sebebiyle "
+            "yedek sistemle hazırlanmıştır.",
+        ]
+
+    return "\n".join(lines)
+
+
+# ─── Müşteri getir ────────────────────────────────────────────────────────────
+
+def _get_todays_customers(personel_hitap: str, limit: int = 10) -> list[dict]:
+    """Bugün atanan, henüz brief gönderilmemiş müşterileri getir."""
+    bugun = datetime.date.today().isoformat()
+    conn  = get_connection()
+    rows  = conn.execute(
+        """SELECT * FROM customers
+           WHERE atanan_personel=?
+           AND atama_tarihi=?
+           AND son_durum='yeni'
+           ORDER BY id ASC LIMIT ?""",
+        (personel_hitap, bugun, limit)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─── Ana brief + mail + WA ───────────────────────────────────────────────────
+
+def run_morning_brief_mail(test_override_mail: str = None) -> dict:
+    """
+    1. Bugün atanan müşterileri çek
+    2. Claude/GPT ile zenginleştir
+    3. Mail gönder (test_override_mail varsa oraya)
+    4. WhatsApp kısa bildirim
+    Döndürür: {personel: {mail_sent, customers_count, fallback_used}}
+    """
+    from core.mail_handler import send_mail
+
+    personeller  = _get_satis_personeli()
+    sektor       = get_current_sector()
+    sezon        = get_season_context()
+    ozet         = {}
+
+    for p in personeller:
+        hitap     = p["hitap"]
+        musteriler = _get_todays_customers(hitap)
+
+        if not musteriler:
+            logger.info(f"Brief mail: {hitap} için bugün müşteri yok")
+            ozet[hitap] = {"mail_sent": False, "customers_count": 0}
+            continue
+
+        # Her müşteri için brief üret
+        musteriler_briefs = []
+        fallback_used     = False
+
+        for c in musteriler:
+            brief = enrich_customer_with_claude(c, hitap, sezon)
+            if brief.get("is_fallback"):
+                fallback_used = True
+            _save_brief(c["id"], brief)
+            _update_customer_status(c["id"], "brief_hazirlandi")
+            musteriler_briefs.append({"customer": c, "brief": brief})
+
+        # Mail metni oluştur
+        body    = _build_brief_mail(hitap, musteriler_briefs, sektor, fallback_used)
+        to_mail = test_override_mail
+
+        # Test değilse personel mailini kullan
+        if not to_mail:
+            from core.config import PERSONEL_MAIL
+            # hitap → isim lower eşleştir
+            for isim_key, mail_val in PERSONEL_MAIL.items():
+                if isim_key in hitap.lower() and mail_val:
+                    to_mail = mail_val
+                    break
+
+        if not to_mail:
+            logger.warning(f"Brief mail: {hitap} için mail adresi yok")
+            ozet[hitap] = {"mail_sent": False, "customers_count": len(musteriler)}
+            continue
+
+        tarih   = datetime.date.today().strftime("%d %B %Y")
+        subject = f"Gunaydın {hitap} — Bugunun Musteri Dosyasi ({tarih})"
+        sent    = send_mail(to=to_mail, subject=subject, body=body)
+
+        if sent:
+            for c in musteriler:
+                _update_customer_status(c["id"], "brief_gonderildi")
+            log_event(AGENT_NAME, f"Brief mail gönderildi → {hitap} ({to_mail})")
+
+        # WhatsApp kısa bildirim
+        if p.get("phone") and sent:
+            wa_msg = (
+                f"Günaydın {hitap} 🌅\n"
+                f"Bugünkü {len(musteriler)} kişilik dosyanız mailinizde hazır. "
+                f"{sektor.capitalize()} sezonu başlıyor, "
+                f"inceleyip aramaya başlayabilirsiniz 🌟"
+            )
+            threading.Thread(
+                target=_send_wa, args=(p["phone"], wa_msg),
+                daemon=True
+            ).start()
+
+        ozet[hitap] = {
+            "mail_sent":       sent,
+            "customers_count": len(musteriler),
+            "fallback_used":   fallback_used,
+            "to_mail":         to_mail,
+        }
+
+    return ozet
 
 
 # ─── Scheduler thread ─────────────────────────────────────────────────────────

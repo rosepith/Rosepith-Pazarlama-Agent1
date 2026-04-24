@@ -61,3 +61,6 @@ YANDEX_APP_PASSWORD = os.getenv("YANDEX_APP_PASSWORD", "")
 
 # Google Maps Places API
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
+
+# Anthropic Claude API
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
