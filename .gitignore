@@ -5,6 +5,9 @@
 secrets.py
 credentials.json
 
+# PHP config (gerçek tokenlar sunucuda, örnek dosya takip edilir)
+deploy/config.php
+
 # Veritabanı
 *.db
 *.sqlite

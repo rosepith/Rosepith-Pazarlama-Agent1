@@ -379,8 +379,8 @@ DURTMECELER = {
         "Merhaba {hitap} 🙂 Müşterilerden geri dönüş var mı, destek gerekiyor mu?",
     ],
     "17:30": [
-        "{hitap} hanım, gün sonu raporu için notlarınızı hazırlamayı unutmayın! 📝",
-        "Merhaba {hitap} 👋 Bugünkü görüşmelerin özetini paylaşır mısınız?",
+        "{hitap} hanım, bugünkü kısa özetinizi mailinize yollayabilirseniz süper olur 🌟",
+        "Merhaba {hitap} 👋 Gün sonu özeti mailinize gelsin, bugün kaç görüşme yaptınız?",
     ],
 }
 
@@ -436,24 +436,13 @@ def _mark_sent(personel_hitap: str, event: str):
 
 # ─── WhatsApp gönderici ───────────────────────────────────────────────────────
 
-def _send_wa(to: str, text: str):
-    try:
-        r = requests.post(
-            f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages",
-            headers={
-                "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "messaging_product": "whatsapp",
-                "to": to, "type": "text",
-                "text": {"preview_url": False, "body": text}
-            },
-            timeout=10
-        )
-        logger.info(f"Satış WA → {to}: HTTP {r.status_code}")
-    except Exception as e:
-        logger.error(f"Satış WA hatası: {e}")
+def _send_wa(to: str, text: str, personel_hitap: str = ""):
+    """
+    Satış WA gönderici — core.whatsapp.send_wa üzerinden.
+    24h pencere kontrolü + şablon fallback (personel_bildirim) otomatik.
+    """
+    from core.whatsapp import send_wa
+    send_wa(to, text, personel_hitap=personel_hitap)
 
 
 # ─── Görev çalıştırıcılar ─────────────────────────────────────────────────────
@@ -496,7 +485,7 @@ def run_durtmece(saat_key: str):
         if _already_sent(p["hitap"], event):
             continue
         msg = _get_durtmece(saat_key, p["hitap"], idx=i)
-        _send_wa(p["phone"], msg)
+        _send_wa(p["phone"], msg, personel_hitap=p["hitap"])
         _mark_sent(p["hitap"], event)
         log_event(AGENT_NAME, f"Dürtmece {saat_key} → {p['hitap']}")
 
@@ -783,7 +772,8 @@ def _get_todays_customers(personel_hitap: str, limit: int = 10) -> list[dict]:
 
 # ─── Ana brief + mail + WA ───────────────────────────────────────────────────
 
-def run_morning_brief_mail(test_override_mail: str = None) -> dict:
+def run_morning_brief_mail(test_override_mail: str = None,
+                            test_override_wa: str = None) -> dict:
     """
     1. Bugün atanan müşterileri çek
     2. Claude/GPT ile zenginleştir
@@ -847,32 +837,99 @@ def run_morning_brief_mail(test_override_mail: str = None) -> dict:
             log_event(AGENT_NAME, f"Brief mail gönderildi → {hitap} ({to_mail})")
 
         # WhatsApp kısa bildirim
-        if p.get("phone") and sent:
+        # test_override_wa varsa oraya, yoksa personel telefonuna
+        wa_target = test_override_wa or p.get("phone")
+        if wa_target and sent:
+            sektor_kisa = sektor.split()[0].capitalize()  # "peyzaj firması" → "Peyzaj"
             wa_msg = (
                 f"Günaydın {hitap} 🌅\n"
-                f"Bugünkü {len(musteriler)} kişilik dosyanız mailinizde hazır. "
-                f"{sektor.capitalize()} sezonu başlıyor, "
+                f"Bugünkü {len(musteriler)} kişilik müşteri dosyanız mailinizde hazır. "
+                f"{sektor_kisa} sezonu başlıyor, "
                 f"inceleyip aramaya başlayabilirsiniz 🌟"
             )
             threading.Thread(
-                target=_send_wa, args=(p["phone"], wa_msg),
-                daemon=True
+                target=_send_wa, args=(wa_target, wa_msg, hitap),
+                daemon=True, name=f"wa_brief_{hitap[:3]}"
             ).start()
+            logger.info(f"Brief WA gönderildi → {hitap} ({wa_target})")
 
         ozet[hitap] = {
             "mail_sent":       sent,
             "customers_count": len(musteriler),
             "fallback_used":   fallback_used,
             "to_mail":         to_mail,
+            "wa_sent":         bool(wa_target and sent),
+            "wa_target":       wa_target or "",
         }
 
     return ozet
 
 
+# ─── Günlük satış akışı (09:30 → Maps + Brief) ───────────────────────────────
+
+def run_daily_sales_flow():
+    """
+    09:30'da otomatik tetiklenir:
+      1. Tatil / hafta sonu kontrolü
+      2. Aynı gün tekrar çalışma engeli (daily_sales DB)
+      3. Maps lead çek  (PARÇA 1)
+      4. 5 dk bekle
+      5. Brief mail + WA gönder (PARÇA 2)
+    """
+    # ── Tatil / hafta sonu ───────────────────────────────────────────────────
+    if is_holiday():
+        logger.info("Günlük satış akışı atlandı — tatil/hafta sonu")
+        return
+
+    # ── Çift çalışma engeli ──────────────────────────────────────────────────
+    if _already_sent("sistem", "maps_fetch"):
+        logger.info("Günlük satış akışı bu gün zaten çalıştı — atlandı")
+        return
+
+    logger.info("Günlük satış akışı başladı (Maps + Brief)")
+
+    # ── PARÇA 1: Maps lead çek ───────────────────────────────────────────────
+    try:
+        maps_ozet = run_maps_lead_fetch()
+        toplam    = sum(len(v) for v in maps_ozet.values())
+        _mark_sent("sistem", "maps_fetch")
+        logger.info(f"Maps fetch tamamlandı: {toplam} yeni lead")
+    except Exception as e:
+        logger.error(f"Maps fetch hatası: {e}")
+        return  # Maps başarısız → brief'e geçme
+
+    # ── 5 dakika bekle ───────────────────────────────────────────────────────
+    logger.info("Brief için 5 dakika bekleniyor (09:35)...")
+    time.sleep(300)
+
+    # ── PARÇA 2: Brief mail + WA ─────────────────────────────────────────────
+    if _already_sent("sistem", "brief_mail"):
+        logger.info("Brief mail bu gün zaten gönderildi — atlandı")
+        return
+
+    try:
+        from core.config import TEST_CUSTOMER_WHATSAPP
+        # Personel WA boşsa TEST_CUSTOMER_WHATSAPP'a gönder
+        personeller = _get_satis_personeli()
+        test_wa = None
+        if any(not p.get("phone") for p in personeller):
+            test_wa = TEST_CUSTOMER_WHATSAPP or None
+
+        brief_ozet = run_morning_brief_mail(test_override_wa=test_wa)
+        _mark_sent("sistem", "brief_mail")
+
+        gonderilen = sum(1 for v in brief_ozet.values() if v.get("mail_sent"))
+        logger.info(f"Brief mail tamamlandı: {gonderilen}/{len(brief_ozet)} gönderildi")
+        log_event(AGENT_NAME, f"Günlük satış akışı tamamlandı: {toplam} lead, {gonderilen} mail")
+
+    except Exception as e:
+        logger.error(f"Brief mail hatası: {e}")
+
+
 # ─── Scheduler thread ─────────────────────────────────────────────────────────
 
 GOREV_SAATLERI = {
-    "09:30": lambda: run_sabah_brief(),
+    "09:30": lambda: run_daily_sales_flow(),  # Maps + Brief mail + WA
     "12:00": lambda: run_durtmece("12:00"),
     "15:00": lambda: run_durtmece("15:00"),
     "17:30": lambda: run_durtmece("17:30"),

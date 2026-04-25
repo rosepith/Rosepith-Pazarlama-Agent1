@@ -54,11 +54,18 @@ def main():
     evening.start()
     log_event("system", "Akşam raporu ajanı aktif")
 
+    # Mail polling — IMAP her 60s, sadece mesai içi
+    from core.mail_handler import MailPollingAgent
+    mail_poll = MailPollingAgent(interval=60)
+    mail_poll.start()
+    log_event("system", "Mail polling ajanı aktif (60s, mesai içi)")
+
     logger.info("✅ Sistem hazır")
     logger.info("   Telegram: dinleniyor")
     logger.info("   Sunucu relay: heartbeat + poll aktif")
     logger.info("   Satış otomasyonu: 09:30 / 12:00 / 15:00 / 17:30")
     logger.info("   Akşam raporu: 18:00")
+    logger.info("   Mail polling: 60s aralık, mesai içi")
     logger.info("   Çıkış için Ctrl+C")
 
     try:
@@ -69,6 +76,7 @@ def main():
         art.stop()
         sales.stop()
         evening.stop()
+        mail_poll.stop()
         log_event("system", "Sistem durduruldu")
 
 
