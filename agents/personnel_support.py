@@ -253,24 +253,13 @@ def _notify_yasin(text: str):
         logger.error(f"Yasin bildirim hatası: {e}")
 
 
-def _send_whatsapp(to: str, text: str):
-    try:
-        r = requests.post(
-            f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages",
-            headers={
-                "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "messaging_product": "whatsapp",
-                "to": to, "type": "text",
-                "text": {"preview_url": False, "body": text}
-            },
-            timeout=10
-        )
-        logger.info(f"WA personel → {to}: HTTP {r.status_code}")
-    except Exception as e:
-        logger.error(f"WA gönderme hatası: {e}")
+def _send_whatsapp(to: str, text: str, personel_hitap: str = ""):
+    """
+    Personel WA gönderici — core.whatsapp.send_wa üzerinden.
+    24h pencere kontrolü + şablon fallback otomatik.
+    """
+    from core.whatsapp import send_wa
+    send_wa(to, text, personel_hitap=personel_hitap)
 
 
 # ─── İş kuyruğu ───────────────────────────────────────────────────────────────

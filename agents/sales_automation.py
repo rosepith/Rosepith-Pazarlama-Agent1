@@ -436,24 +436,13 @@ def _mark_sent(personel_hitap: str, event: str):
 
 # ─── WhatsApp gönderici ───────────────────────────────────────────────────────
 
-def _send_wa(to: str, text: str):
-    try:
-        r = requests.post(
-            f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages",
-            headers={
-                "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "messaging_product": "whatsapp",
-                "to": to, "type": "text",
-                "text": {"preview_url": False, "body": text}
-            },
-            timeout=10
-        )
-        logger.info(f"Satış WA → {to}: HTTP {r.status_code}")
-    except Exception as e:
-        logger.error(f"Satış WA hatası: {e}")
+def _send_wa(to: str, text: str, personel_hitap: str = ""):
+    """
+    Satış WA gönderici — core.whatsapp.send_wa üzerinden.
+    24h pencere kontrolü + şablon fallback (personel_bildirim) otomatik.
+    """
+    from core.whatsapp import send_wa
+    send_wa(to, text, personel_hitap=personel_hitap)
 
 
 # ─── Görev çalıştırıcılar ─────────────────────────────────────────────────────
@@ -496,7 +485,7 @@ def run_durtmece(saat_key: str):
         if _already_sent(p["hitap"], event):
             continue
         msg = _get_durtmece(saat_key, p["hitap"], idx=i)
-        _send_wa(p["phone"], msg)
+        _send_wa(p["phone"], msg, personel_hitap=p["hitap"])
         _mark_sent(p["hitap"], event)
         log_event(AGENT_NAME, f"Dürtmece {saat_key} → {p['hitap']}")
 
@@ -859,7 +848,7 @@ def run_morning_brief_mail(test_override_mail: str = None,
                 f"inceleyip aramaya başlayabilirsiniz 🌟"
             )
             threading.Thread(
-                target=_send_wa, args=(wa_target, wa_msg),
+                target=_send_wa, args=(wa_target, wa_msg, hitap),
                 daemon=True, name=f"wa_brief_{hitap[:3]}"
             ).start()
             logger.info(f"Brief WA gönderildi → {hitap} ({wa_target})")
