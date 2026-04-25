@@ -71,6 +71,25 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            user_id TEXT PRIMARY KEY,
+            profile TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # log_events — /durum komutu ve hata takibi için (logs ile alias)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS log_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent TEXT,
+            level TEXT DEFAULT 'INFO',
+            message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -81,6 +100,14 @@ def log_event(agent: str, message: str, level: str = "INFO"):
         "INSERT INTO logs (level, agent, message) VALUES (?, ?, ?)",
         (level, agent, message)
     )
+    # log_events tablosuna da yaz (/durum komutu için)
+    try:
+        conn.execute(
+            "INSERT INTO log_events (agent, level, message) VALUES (?, ?, ?)",
+            (agent, level, message)
+        )
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -123,3 +150,41 @@ def add_to_queue(user_id: str, role: str, message: str):
     )
     conn.commit()
     conn.close()
+
+
+def get_user_profile(user_id: str) -> str:
+    """Kullanıcı profilini döndür (kısa özet metni)."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT profile FROM user_profiles WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return row["profile"] if row else ""
+    except Exception:
+        return ""
+    finally:
+        conn.close()
+
+
+def save_user_profile(user_id: str, profile: str):
+    """Kullanıcı profilini güncelle veya oluştur."""
+    conn = get_connection()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id TEXT PRIMARY KEY,
+                profile TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute(
+            "INSERT OR REPLACE INTO user_profiles (user_id, profile) VALUES (?, ?)",
+            (user_id, profile)
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+

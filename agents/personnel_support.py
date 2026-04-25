@@ -52,17 +52,29 @@ REVIZE_KEYWORDS = [
     "tekrar yaz", "değişiklik", "yanlış", "hatalı",
 ]
 
+# ─── Türkçe karakter normalizasyonu ──────────────────────────────────────────
+
+_TR_MAP = str.maketrans("ğşıöüçĞŞİÖÜÇ", "gsioucGSIOUC")
+# Not: ç→c ayrımı önemli değil (ISIM_TO_PROFIL'de c yok)
+
+
+def _normalize(s: str) -> str:
+    """Türkçe karakterleri ASCII karşılıklarına çevirir, lowercase yapar.
+    Örnek: 'Kağan' → 'kagan', 'Asuman Hanım' → 'asuman hanim'
+    """
+    return s.lower().translate(_TR_MAP)
+
 
 def _get_profil(phone: str) -> dict:
     from core.config import PERSONEL_MAIL
     isim_raw = PERSONEL_WHATSAPP.get(phone, "").lower().strip()
-    # İsim normalizasyon (Eda Ulusoy → eda, Kağan Burmalar → kagan)
+    isim_norm = _normalize(isim_raw)   # ğ→g, ş→s vs.
     for key in ISIM_TO_PROFIL:
-        if key in isim_raw:
-            # Mail adresini de bul
+        if key in isim_norm:
+            # Mail adresini de bul (normalize ile karşılaştır)
             mail_addr = ""
             for isim_key, mail_val in PERSONEL_MAIL.items():
-                if key in isim_key.lower():
+                if key in _normalize(isim_key):
                     mail_addr = mail_val
                     break
             return {**ISIM_TO_PROFIL[key], "isim": isim_raw.title(),
@@ -82,7 +94,7 @@ def _get_profil_by_mail(from_mail: str) -> dict | None:
     for isim_key, mail_val in PERSONEL_MAIL.items():
         if mail_val and mail_val.lower().strip() == from_clean:
             for key in ISIM_TO_PROFIL:
-                if key in isim_key.lower():
+                if key in _normalize(isim_key):
                     # Telefon numarasını da bul
                     phone = ""
                     for ph, isim in PERSONEL_WHATSAPP.items():
@@ -465,7 +477,7 @@ def _send_work_result_mail(hitap: str, to_mail: str,
         phone = ""
         for ph, isim in PERSONEL_WHATSAPP.items():
             for key in ISIM_TO_PROFIL:
-                if key in isim.lower() and ISIM_TO_PROFIL[key]["hitap"] == hitap:
+                if key in _normalize(isim) and ISIM_TO_PROFIL[key]["hitap"] == hitap:
                     phone = ph
                     break
         if phone:

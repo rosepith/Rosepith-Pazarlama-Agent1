@@ -132,6 +132,9 @@ def _ensure_year(year: int):
 
 def is_holiday(date: datetime.date = None) -> bool:
     """Bugün (veya verilen tarih) tatil mi? Hafta sonu dahil."""
+    import os
+    if os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes"):
+        return False   # TEST_MODE: tatil yok → her gün çalış
     if date is None:
         date = datetime.date.today()
     if date.weekday() >= 5:
@@ -174,6 +177,9 @@ def get_holiday_name(date: datetime.date = None) -> str:
 
 def is_work_hours(now: datetime.datetime = None) -> bool:
     """Mesai saati mi? (tatil ve hafta sonu = hayır)"""
+    import os
+    if os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes"):
+        return True    # TEST_MODE: her saat mesai içi
     if now is None:
         now = datetime.datetime.now()
     if is_holiday(now.date()):

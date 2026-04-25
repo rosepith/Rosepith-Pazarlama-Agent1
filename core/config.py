@@ -28,14 +28,15 @@ SYSTEM_MODE = os.getenv("SYSTEM_MODE", "full")
 _db = os.getenv("DB_PATH", "rosepith.db")
 DB_PATH = str(PROJECT_ROOT / _db)
 
-# Personel WhatsApp: {phone: isim}
+# Personel WhatsApp: {phone: hitap}  — .env'den PERSONEL_N_HITAP okunur
 PERSONEL_WHATSAPP: dict[str, str] = {}
 _i = 1
 while True:
-    wa   = os.getenv(f"PERSONEL_{_i}_WHATSAPP","").strip()
-    isim = os.getenv(f"PERSONEL_{_i}_ISIM","").strip()
-    if not wa or not isim: break
-    PERSONEL_WHATSAPP[wa] = isim
+    wa    = os.getenv(f"PERSONEL_{_i}_WHATSAPP", "").strip()
+    hitap = os.getenv(f"PERSONEL_{_i}_HITAP",    "").strip()
+    if not wa or not hitap:
+        break
+    PERSONEL_WHATSAPP[wa] = hitap
     _i += 1
 
 # Personel Telegram: {isim: telegram_id}
@@ -43,16 +44,17 @@ PERSONEL: dict[str, str] = {}
 ROLE_PERSONNEL_IDS: list[str] = []
 ROLE_CUSTOMER_IDS:  list[str] = []
 
-# Personel Mail: {isim_lower: mail}
+# Personel Mail: {hitap_lower: mail}  — .env'den PERSONEL_N_MAIL okunur
 PERSONEL_MAIL: dict[str, str] = {}
 _j = 1
 while True:
-    _wa   = os.getenv(f"PERSONEL_{_j}_WHATSAPP","").strip()
-    _isim = os.getenv(f"PERSONEL_{_j}_ISIM","").strip()
-    _mail = os.getenv(f"PERSONEL_{_j}_MAIL","").strip()
-    if not _wa and not _isim: break
-    if _isim and _mail:
-        PERSONEL_MAIL[_isim.lower()] = _mail
+    _wa    = os.getenv(f"PERSONEL_{_j}_WHATSAPP", "").strip()
+    _hitap = os.getenv(f"PERSONEL_{_j}_HITAP",    "").strip()
+    _mail  = os.getenv(f"PERSONEL_{_j}_MAIL",     "").strip()
+    if not _wa and not _hitap:
+        break
+    if _hitap and _mail:
+        PERSONEL_MAIL[_hitap.lower()] = _mail
     _j += 1
 
 # Yandex Mail (Art Direktör)

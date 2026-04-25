@@ -11,7 +11,6 @@ import requests
 from core.config import (
     TELEGRAM_BOT_TOKEN, YASIN_TELEGRAM_ID,
     PERSONEL_WHATSAPP, PERSONEL,
-    WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN,
     TEST_CUSTOMER_WHATSAPP,
 )
 from core.database import log_event, save_message, load_history, add_to_queue, get_user_profile, save_user_profile
@@ -69,17 +68,9 @@ def _send_typing_action(chat_id):
     except Exception: pass
 
 def _send_whatsapp(to: str, text: str):
-    try:
-        r = requests.post(
-            f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages",
-            headers={"Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}", "Content-Type": "application/json"},
-            json={"messaging_product": "whatsapp", "to": to, "type": "text",
-                  "text": {"preview_url": False, "body": text}},
-            timeout=10
-        )
-        logger.info(f"WA gönderildi → {to}: HTTP {r.status_code}")
-    except Exception as e:
-        logger.error(f"WA gönderme hata: {e}")
+    """Müşteri WA gönderici — core.whatsapp üzerinden (24h window + şablon fallback)."""
+    from core.whatsapp import send_wa
+    send_wa(to, text)
 
 def _notify_yasin(text: str):
     _send_telegram(YASIN_TELEGRAM_ID, text)

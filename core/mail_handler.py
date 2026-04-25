@@ -288,10 +288,18 @@ def get_last_sent_mail_id(personel_hitap: str) -> str:
     return row[0] if row else ""
 
 
+_TR_MAP = str.maketrans("ğşıöüçĞŞİÖÜÇ", "gsioucGSIOUC")
+
+
+def _normalize(s: str) -> str:
+    """Türkçe karakterleri ASCII'ye çevir, lowercase yap."""
+    return s.lower().translate(_TR_MAP)
+
+
 def _find_personel_by_mail(from_addr: str) -> str:
     """
     from_addr ile PERSONEL_MAIL eşleştir.
-    Döndürür: personel_hitap ("Kağan", "Eda Hanım" vb.) veya boş string.
+    Döndürür: personel_hitap ("Kağan", "Asuman Hanım" vb.) veya boş string.
     """
     from core.config import PERSONEL_MAIL
     from_clean = from_addr.lower().strip()
@@ -302,7 +310,7 @@ def _find_personel_by_mail(from_addr: str) -> str:
         if mail_val and mail_val.lower().strip() == from_clean:
             from agents.personnel_support import ISIM_TO_PROFIL
             for key in ISIM_TO_PROFIL:
-                if key in isim_key.lower():
+                if key in _normalize(isim_key):   # ğ/g normalize
                     return ISIM_TO_PROFIL[key]["hitap"]
             return isim_key.title()
     return ""
