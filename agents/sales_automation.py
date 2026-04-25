@@ -379,8 +379,8 @@ DURTMECELER = {
         "Merhaba {hitap} 🙂 Müşterilerden geri dönüş var mı, destek gerekiyor mu?",
     ],
     "17:30": [
-        "{hitap} hanım, gün sonu raporu için notlarınızı hazırlamayı unutmayın! 📝",
-        "Merhaba {hitap} 👋 Bugünkü görüşmelerin özetini paylaşır mısınız?",
+        "{hitap} hanım, bugünkü kısa özetinizi mailinize yollayabilirseniz süper olur 🌟",
+        "Merhaba {hitap} 👋 Gün sonu özeti mailinize gelsin, bugün kaç görüşme yaptınız?",
     ],
 }
 

@@ -203,6 +203,52 @@ def send_mail(to: str, subject: str, body: str,
         return False
 
 
+# ─── Poll zaman takibi ───────────────────────────────────────────────────────
+
+_last_poll_time: str = ""   # In-memory, process ömrü boyunca
+
+
+def _record_poll_time():
+    """Son polling zamanını kaydet (in-memory + DB)."""
+    global _last_poll_time
+    import datetime
+    _last_poll_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        from core.database import get_connection
+        conn = get_connection()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute(
+            "INSERT OR REPLACE INTO system_meta (key, value) VALUES ('last_mail_poll', ?)",
+            (_last_poll_time,)
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def get_last_poll_time() -> str:
+    """Son mail poll zamanını döndür."""
+    if _last_poll_time:
+        return _last_poll_time
+    try:
+        from core.database import get_connection
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT value FROM system_meta WHERE key='last_mail_poll'"
+        ).fetchone()
+        conn.close()
+        return row[0] if row else "henüz poll yapılmadı"
+    except Exception:
+        return "henüz poll yapılmadı"
+
+
 # ─── PARÇA 3: Yardımcı sorgular ──────────────────────────────────────────────
 
 def get_thread_body(message_id: str) -> str:
@@ -367,6 +413,7 @@ class MailPollingAgent:
                 time.sleep(self._interval)
                 continue
             try:
+                _record_poll_time()
                 mails = poll_new_mails(limit=20)
                 for m in mails:
                     # Daha önce işlenmediyse işle

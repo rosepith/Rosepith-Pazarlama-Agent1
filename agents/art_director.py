@@ -140,15 +140,66 @@ def handle_whatsapp_message(phone: str, name: str, text: str):
 
 def _cmd_durum() -> str:
     from core.database import get_connection
+    from core.holiday_checker import is_holiday, is_work_hours, get_holiday_name
+    from core.mail_handler import get_last_poll_time
+    import datetime as dt
+
     conn  = get_connection()
-    today = datetime.date.today().isoformat()
-    msgs  = conn.execute("SELECT COUNT(*) FROM conversations WHERE date(created_at)=?", (today,)).fetchone()[0]
-    queue = conn.execute("SELECT COUNT(*) FROM task_queue WHERE status='pending'").fetchone()[0]
+    today = dt.date.today().isoformat()
+    now   = dt.datetime.now()
+
+    # Temel sayılar
+    msgs      = _safe_q(conn, "SELECT COUNT(*) FROM conversations WHERE date(created_at)=?", (today,))
+    wa_kuyruk = _safe_q(conn, "SELECT COUNT(*) FROM task_queue WHERE status='pending'")
+    is_bekl   = _safe_q(conn, "SELECT COUNT(*) FROM work_items WHERE status='pending'")
+    is_acil   = _safe_q(conn, "SELECT COUNT(*) FROM work_items WHERE is_urgent=1 AND status='pending'")
+    mail_gel  = _safe_q(conn, "SELECT COUNT(*) FROM mail_threads WHERE direction='in' AND date(created_at)=?", (today,))
+    mail_git  = _safe_q(conn, "SELECT COUNT(*) FROM mail_threads WHERE direction='out' AND date(created_at)=?", (today,))
+
+    # Son hata
+    try:
+        son_hata_row = conn.execute(
+            "SELECT message FROM log_events WHERE level='ERROR' AND date(created_at)=? ORDER BY id DESC LIMIT 1",
+            (today,)
+        ).fetchone()
+        son_hata = son_hata_row["message"][:80] if son_hata_row else "yok"
+    except Exception:
+        son_hata = "tablo yok"
+
     conn.close()
-    mode = get_mode()
-    return (f"<b>Sistem Durumu</b>\n"
-            f"Tarih: {today}\nMesaj: {msgs}\nKuyruk: {queue}\n"
-            f"AI Mod: {mode}\nW10: Aktif ✅")
+
+    tatil_bugun = is_holiday(now.date())
+    tatil_isim  = get_holiday_name(now.date()) or "tatil/hafta sonu"
+    mesai_ici   = is_work_hours(now)
+    mode        = get_mode()
+    son_poll    = get_last_poll_time()
+
+    lines = [
+        f"<b>🖥 Sistem Durumu — {today} {now.strftime('%H:%M')}</b>",
+        "",
+        f"🌐 W10           : Aktif ✅",
+        f"🤖 AI Modu       : {mode}",
+        f"📅 Mesai         : {'İçi ✅' if mesai_ici else 'Dışı ⏸'}",
+        f"🎌 Tatil         : {'EVET — ' + tatil_isim if tatil_bugun else 'Hayır'}",
+        "",
+        f"📧 Mail polling  : {son_poll}",
+        f"   Bugün gelen   : {mail_gel} | giden: {mail_git}",
+        "",
+        f"💬 WA mesaj      : {msgs} (bugün)",
+        f"📥 WA kuyruk     : {wa_kuyruk}",
+        f"💼 Bekleyen iş   : {is_bekl}",
+        f"🚨 ACİL bekleyen : {is_acil}",
+        "",
+        f"⚠️ Son hata      : {son_hata}",
+    ]
+    return "\n".join(lines)
+
+
+def _safe_q(conn, sql: str, params: tuple = ()) -> int:
+    try:
+        return conn.execute(sql, params).fetchone()[0]
+    except Exception:
+        return 0
 
 def _cmd_rapor() -> str:
     from core.database import get_connection
