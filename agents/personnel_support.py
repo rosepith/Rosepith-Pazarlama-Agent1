@@ -46,15 +46,61 @@ ISIM_TO_PROFIL = {
     "deniz":  {"hitap": "Deniz",       "rol": "eticaret",  "departman": "E-Ticaret"},
 }
 
+# Revize sinyali anahtar kelimeleri (WA'dan)
+REVIZE_KEYWORDS = [
+    "revize", "düzelt", "değiştir", "güncelle", "yenile",
+    "tekrar yaz", "değişiklik", "yanlış", "hatalı",
+]
+
 
 def _get_profil(phone: str) -> dict:
+    from core.config import PERSONEL_MAIL
     isim_raw = PERSONEL_WHATSAPP.get(phone, "").lower().strip()
     # İsim normalizasyon (Eda Ulusoy → eda, Kağan Burmalar → kagan)
     for key in ISIM_TO_PROFIL:
         if key in isim_raw:
-            return {**ISIM_TO_PROFIL[key], "isim": isim_raw.title(), "phone": phone}
+            # Mail adresini de bul
+            mail_addr = ""
+            for isim_key, mail_val in PERSONEL_MAIL.items():
+                if key in isim_key.lower():
+                    mail_addr = mail_val
+                    break
+            return {**ISIM_TO_PROFIL[key], "isim": isim_raw.title(),
+                    "phone": phone, "mail": mail_addr}
     return {"hitap": isim_raw.title() or phone, "rol": "genel",
-            "departman": "Genel", "isim": isim_raw.title(), "phone": phone}
+            "departman": "Genel", "isim": isim_raw.title(),
+            "phone": phone, "mail": ""}
+
+
+def _get_profil_by_mail(from_mail: str) -> dict | None:
+    """Mail adresinden personel profilini bul."""
+    from core.config import PERSONEL_MAIL
+    from_clean = from_mail.lower().strip()
+    if "<" in from_clean:
+        from_clean = from_clean.split("<")[-1].rstrip(">").strip()
+
+    for isim_key, mail_val in PERSONEL_MAIL.items():
+        if mail_val and mail_val.lower().strip() == from_clean:
+            for key in ISIM_TO_PROFIL:
+                if key in isim_key.lower():
+                    # Telefon numarasını da bul
+                    phone = ""
+                    for ph, isim in PERSONEL_WHATSAPP.items():
+                        if key in isim.lower():
+                            phone = ph
+                            break
+                    return {**ISIM_TO_PROFIL[key], "isim": isim_key.title(),
+                            "phone": phone, "mail": mail_val}
+            return {"hitap": isim_key.title(), "rol": "genel",
+                    "departman": "Genel", "isim": isim_key.title(),
+                    "phone": "", "mail": mail_val}
+    return None
+
+
+def _is_revize_request(text: str) -> bool:
+    """WA mesajında revize sinyali var mı?"""
+    t = text.lower()
+    return any(kw in t for kw in REVIZE_KEYWORDS)
 
 
 # ─── Yardım tipi tespiti ──────────────────────────────────────────────────────
@@ -294,6 +340,22 @@ def handle_whatsapp_personnel(phone: str, name: str, text: str):
     holiday_nm = get_holiday_name(now.date())
 
     save_message(phone, "personnel", "in", text)
+
+    # ── Revize sinyali tespiti (WA'dan) ──────────────────────────────────────
+    if _is_revize_request(text):
+        from core.mail_handler import get_last_sent_mail_id
+        last_mail_id = get_last_sent_mail_id(hitap)
+        if last_mail_id:
+            reply = (
+                f"{hitap}, revize talebinizi mail üzerinden iletirseniz "
+                f"daha düzenli takip edebilirim. "
+                f"Son gönderdiğim maile cevap yazabilirsiniz 🌟"
+            )
+            _send_whatsapp(phone, reply)
+            save_message(phone, "personnel", "out", reply)
+            log_event(AGENT_NAME, f"WA revize yönlendirmesi → {hitap}")
+            return
+
     help_type  = _detect_help_type(text)
     complexity = _detect_complexity(text)
 
@@ -363,4 +425,261 @@ def handle_whatsapp_personnel(phone: str, name: str, text: str):
     _send_whatsapp(phone, reply)
     save_message(phone, "personnel", "out", reply)
     _complete_work_item(item_id, reply)
+
+    # İş sonucunu mail olarak da gönder (arka planda)
+    mail_addr = profil.get("mail", "")
+    if mail_addr:
+        threading.Thread(
+            target=_send_work_result_mail,
+            args=(hitap, mail_addr, help_type, text, reply),
+            daemon=True
+        ).start()
+
     log_event(AGENT_NAME, f"{hitap} → {help_type}/{complexity} yanıtlandı")
+
+
+# ─── İş sonucu mail gönderici ─────────────────────────────────────────────────
+
+def _send_work_result_mail(hitap: str, to_mail: str,
+                            help_type: str, original_text: str,
+                            result_text: str):
+    """
+    İş tamamlandığında personelin mailine sonuç gönder.
+    WA üzerinden "mailine yolladım" bildirimi yapılır.
+    """
+    if not to_mail:
+        return
+    from core.mail_handler import send_mail
+    tip_map = {
+        "data_research": "Araştırma Sonucu",
+        "tactic":        "Taktik Önerisi",
+        "price_offer":   "Fiyat/Teklif Yönlendirmesi",
+        "personal_abnormal": "Yönlendirme Notu",
+    }
+    tip_str = tip_map.get(help_type, "İş Sonucu")
+    tarih   = __import__("datetime").datetime.now().strftime("%d.%m.%Y %H:%M")
+
+    body = (
+        f"Merhaba {hitap},\n\n"
+        f"[{tarih}] ilettiğiniz talep için hazırladığım {tip_str}:\n\n"
+        f"─────────────────────────────────\n"
+        f"TALEP:\n{original_text[:400]}\n\n"
+        f"SONUÇ:\n{result_text}\n"
+        f"─────────────────────────────────\n\n"
+        f"İyi çalışmalar 🌟\nRosepith Sistem"
+    )
+    subject = f"İş Sonucu — {tip_str} ({tarih})"
+    sent    = send_mail(to=to_mail, subject=subject, body=body)
+
+    if sent:
+        # WA'dan kısa bildirim
+        phone = ""
+        for ph, isim in PERSONEL_WHATSAPP.items():
+            for key in ISIM_TO_PROFIL:
+                if key in isim.lower() and ISIM_TO_PROFIL[key]["hitap"] == hitap:
+                    phone = ph
+                    break
+        if phone:
+            short = result_text[:80] + ("..." if len(result_text) > 80 else "")
+            wa_msg = f"{hitap}, {tip_str.lower()} mailine yolladım, kontrol et 🌟"
+            threading.Thread(target=_send_whatsapp, args=(phone, wa_msg), daemon=True).start()
+
+        logger.info(f"İş sonucu mail gönderildi → {hitap} ({to_mail})")
+
+
+# ─── Mail üzerinden personel desteği ─────────────────────────────────────────
+
+def _handle_mail_revize(from_mail: str, profil: dict,
+                         subject: str, body: str,
+                         message_id: str, thread_ref: str,
+                         is_urgent: bool):
+    """
+    Revize akışı:
+    Önceki mail body'sini bağlam olarak ekle → AI ile yeniden üret
+    → Orijinal thread'e reply olarak gönder → WA bildirim.
+    """
+    from core.mail_handler import send_mail, get_thread_body
+
+    hitap = profil["hitap"]
+    phone = profil.get("phone", "")
+
+    # Önceki çalışmayı bağlam olarak al
+    prev_body  = get_thread_body(thread_ref) if thread_ref else ""
+    context    = f"\n\nÖNCEKİ ÇALIŞMA (revize edilecek):\n{prev_body[:600]}" if prev_body else ""
+
+    revize_sys = (
+        PERSONEL_SYSTEM
+        + f"\n\nPersonel: {hitap} | Kanal: E-posta | REVİZE TALEBI{context}"
+    )
+    complexity  = _detect_complexity(body)
+    revize_text = f"Revize talebi:\n{body}"
+
+    item_id = _add_work_item(
+        hitap, phone or from_mail, "tactic", complexity,
+        f"[MAIL REVİZE] {subject}\n\n{body}", is_urgent=is_urgent
+    )
+
+    reply_text = _get_ai_response(complexity, [], revize_text, revize_sys)
+    if reply_text is None:
+        reply_text = "Revize talebinizi aldım, inceleyip güncellenmiş versiyonu ayrıca göndereceğim."
+
+    _complete_work_item(item_id, reply_text)
+
+    sent = send_mail(
+        to         = from_mail,
+        subject    = f"Re: {subject}",
+        body       = (
+            f"Merhaba {hitap},\n\n"
+            f"Revize talebiniz işlendi:\n\n{reply_text}\n\nRosepith Sistem"
+        ),
+        reply_to_id = thread_ref or message_id,
+    )
+
+    if phone and sent:
+        threading.Thread(
+            target=_send_whatsapp,
+            args=(phone, f"{hitap}, revize talebinizi işledim, mail olarak gönderdim 🌟"),
+            daemon=True
+        ).start()
+
+    log_event(AGENT_NAME, f"Mail revize → {hitap} | {subject[:40]}")
+
+
+def handle_mail_personnel(from_mail: str, personel_hitap: str,
+                           subject: str, body: str,
+                           message_id: str, thread_ref: str = "",
+                           is_revize: bool = False,
+                           is_urgent: bool = False):
+    """
+    mail_handler.process_incoming_mail() tarafından çağrılır.
+
+    is_revize=True  → _handle_mail_revize (önceki iş bağlamı + reply)
+    is_revize=False → Yeni iş; sınıflandır, AI ile yanıtla, mail cevap + WA bildirim
+    """
+    from core.mail_handler import send_mail
+
+    profil = _get_profil_by_mail(from_mail)
+    if profil is None:
+        # hitap biliniyor ama profil detayı yok → minimal profil kur
+        profil = {"hitap": personel_hitap, "rol": "genel",
+                  "departman": "Genel", "isim": personel_hitap,
+                  "phone": "", "mail": from_mail}
+
+    hitap = profil["hitap"]
+    phone = profil.get("phone", "")
+
+    logger.info(f"handle_mail_personnel | {hitap} | revize={is_revize} | acil={is_urgent}")
+
+    # ── ACİL: Yasin'e anında bildir + ön cevap ───────────────────────────────
+    if is_urgent:
+        threading.Thread(
+            target=_notify_yasin,
+            args=(
+                f"🚨 <b>ACİL Mail</b>\n{hitap} → <b>{subject}</b>\n"
+                f"Öne alayım mı?\n\n{body[:200]}",
+            ),
+            daemon=True
+        ).start()
+        send_mail(
+            to          = from_mail,
+            subject     = f"Re: {subject}",
+            body        = (
+                f"Merhaba {hitap},\n\n"
+                f"ACİL talebinizi aldım. Yetkililere bildirdim, beklemede tutuyorum.\n\n"
+                f"Rosepith Sistem"
+            ),
+            reply_to_id = message_id,
+        )
+
+    # ── Revize ───────────────────────────────────────────────────────────────
+    if is_revize:
+        _handle_mail_revize(from_mail, profil, subject, body,
+                             message_id, thread_ref, is_urgent)
+        return
+
+    # ── Yeni iş ──────────────────────────────────────────────────────────────
+    help_type  = _detect_help_type(body)
+    complexity = _detect_complexity(body)
+
+    # Fiyat talebi
+    if help_type == "price_offer":
+        threading.Thread(
+            target=_notify_yasin,
+            args=(f"💰 <b>Mail Fiyat Talebi</b>\n{hitap}\nKonu: {subject}\n\n{body[:300]}",),
+            daemon=True
+        ).start()
+        send_mail(
+            to          = from_mail,
+            subject     = f"Re: {subject}",
+            body        = (
+                f"Merhaba {hitap},\n\nFiyat/teklif talebinizi yetkili ekibe ilettim. "
+                f"En kısa sürede dönüş yapılacak.\n\nRosepith Sistem"
+            ),
+            reply_to_id = message_id,
+        )
+        _add_work_item(hitap, phone or from_mail, help_type, complexity,
+                       f"[MAIL] {subject}\n\n{body}", is_urgent=is_urgent)
+        log_event(AGENT_NAME, f"Mail fiyat talebi → {hitap}")
+        return
+
+    # Kişisel / anormal
+    if help_type == "personal_abnormal":
+        threading.Thread(
+            target=_notify_yasin,
+            args=(f"⚠️ <b>Mail Kişisel/Anormal</b>\n{hitap}\nKonu: {subject}\n\n{body[:300]}",),
+            daemon=True
+        ).start()
+        send_mail(
+            to          = from_mail,
+            subject     = f"Re: {subject}",
+            body        = (
+                f"Merhaba {hitap},\n\nDurumunuzu yetkililere ilettim. "
+                f"En kısa sürede ilgilenilecek.\n\nRosepith Sistem"
+            ),
+            reply_to_id = message_id,
+        )
+        _add_work_item(hitap, phone or from_mail, help_type, complexity,
+                       f"[MAIL] {subject}\n\n{body}", is_urgent=is_urgent)
+        log_event(AGENT_NAME, f"Mail kişisel/anormal → {hitap}")
+        return
+
+    # Data / Taktik → AI
+    item_id = _add_work_item(
+        hitap, phone or from_mail, help_type, complexity,
+        f"[MAIL] {subject}\n\n{body}", is_urgent=is_urgent
+    )
+
+    system_p   = PERSONEL_SYSTEM + f"\n\nPersonel: {hitap} | Kanal: E-posta"
+    full_input = f"Konu: {subject}\n\n{body}"
+    reply_text = _get_ai_response(complexity, [], full_input, system_p)
+
+    if reply_text is None:
+        reply_text = "Talebinizi aldım, inceleyip en kısa sürede dönüş yapacağım."
+        threading.Thread(
+            target=_notify_yasin,
+            args=(f"⚠️ Personel AI (mail) başarısız\n{hitap}: {subject[:60]}",),
+            daemon=True
+        ).start()
+
+    _complete_work_item(item_id, reply_text)
+
+    # Mail ile cevap (thread'e)
+    sent = send_mail(
+        to          = from_mail,
+        subject     = f"Re: {subject}",
+        body        = (
+            f"Merhaba {hitap},\n\n{reply_text}\n\nRosepith Sistem"
+        ),
+        reply_to_id = message_id,
+    )
+
+    # WA kısa bildirimi
+    if phone and sent:
+        tip_str = "araştırma sonucu" if help_type == "data_research" else "taktik önerisi"
+        threading.Thread(
+            target=_send_whatsapp,
+            args=(phone, f"{hitap}, {tip_str} mailine yolladım, kontrol et 🌟"),
+            daemon=True
+        ).start()
+
+    log_event(AGENT_NAME, f"Mail yanıtlandı → {hitap} | {help_type}/{complexity}")
